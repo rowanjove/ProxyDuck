@@ -4408,9 +4408,11 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
+ "directories",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -4443,12 +4445,14 @@ name = "smartflow-ui"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "directories",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
  "single-instance",
  "tauri",
  "tauri-build",
+ "uuid",
 ]
 
 [[package]]

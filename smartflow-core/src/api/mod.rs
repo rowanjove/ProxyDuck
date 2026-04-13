@@ -5,9 +5,10 @@ use std::{
 
 use anyhow::Result;
 use axum::{
-    extract::{Path, Query, State},
-    http::{HeaderValue, StatusCode},
-    response::IntoResponse,
+    extract::{Path, Query, Request, State},
+    http::{HeaderValue, Method, StatusCode},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
     routing::{get, post, put},
     Json, Router,
 };
@@ -26,8 +27,9 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 use crate::{
     model::{
-        AppConfig, EngineMode, HealthStatus, MatchCriteria, ProcessInfo, ProxyProfile,
-        QuickBarItem, Rule, RuntimeStats, StartMode, UiLogEvent,
+        AppConfig, EngineMode, HealthStatus, MatchCriteria, MatchEvent, ProcessInfo, ProxyHitStat,
+        ProxyProfile, QuickBarItem, Rule, RuleHitStat, RuleSource, RuntimeStats, StartMode,
+        UiLogEvent,
     },
     process::{launch_quick_bar_item, list_processes},
     state::CoreState,
@@ -46,6 +48,9 @@ fn router(state: CoreState) -> Router {
         .route("/health", get(health))
         .route("/config", get(get_config).put(put_config))
         .route("/stats", get(get_stats))
+        .route("/stats/rules", get(get_rule_stats))
+        .route("/stats/proxies", get(get_proxy_stats))
+        .route("/stats/hits", get(get_recent_hits))
         .route("/logs", get(get_logs))
         .route("/icon/exe", get(get_exe_icon))
         .route("/processes", get(get_processes))
@@ -61,6 +66,8 @@ fn router(state: CoreState) -> Router {
         .route("/proxies/:id", put(update_proxy).delete(delete_proxy))
         .route("/engine/mode", post(change_engine_mode))
         .route("/runtime", post(update_runtime))
+        .route("/templates/ai-dev", post(apply_ai_dev_template))
+        .layer(middleware::from_fn_with_state(state.clone(), require_auth))
         .layer(
             CorsLayer::new()
                 .allow_origin(AllowOrigin::predicate(|origin, _| {
@@ -71,6 +78,31 @@ fn router(state: CoreState) -> Router {
         )
         .layer(TraceLayer::new_for_http())
         .with_state(state)
+}
+
+async fn require_auth(
+    state: CoreState,
+    request: Request,
+    next: Next,
+) -> Result<Response, (StatusCode, Json<ApiErrorBody>)> {
+    if request.method() == Method::OPTIONS {
+        return Ok(next.run(request).await);
+    }
+
+    let token = request
+        .headers()
+        .get("x-smartflow-token")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim);
+
+    if token == Some(state.auth_token.as_str()) {
+        return Ok(next.run(request).await);
+    }
+
+    Err(err(
+        StatusCode::UNAUTHORIZED,
+        "missing or invalid X-SmartFlow-Token",
+    ))
 }
 
 fn is_allowed_local_origin(origin: &HeaderValue) -> bool {
@@ -138,7 +170,7 @@ async fn health(State(state): State<CoreState>) -> Json<ApiResponse<HealthStatus
     ok(HealthStatus {
         status: "ok".to_string(),
         version: cfg.version,
-        engine_mode: format!("{:?}", cfg.engine_mode),
+        engine_mode: crate::engine::mode_name(cfg.engine_mode),
     })
 }
 
@@ -170,6 +202,18 @@ async fn put_config(
 
 async fn get_stats(State(state): State<CoreState>) -> Json<ApiResponse<RuntimeStats>> {
     ok(state.stats_snapshot())
+}
+
+async fn get_rule_stats(State(state): State<CoreState>) -> Json<ApiResponse<Vec<RuleHitStat>>> {
+    ok(state.list_rule_hit_stats())
+}
+
+async fn get_proxy_stats(State(state): State<CoreState>) -> Json<ApiResponse<Vec<ProxyHitStat>>> {
+    ok(state.list_proxy_hit_stats())
+}
+
+async fn get_recent_hits(State(state): State<CoreState>) -> Json<ApiResponse<Vec<MatchEvent>>> {
+    ok(state.list_recent_matches())
 }
 
 async fn get_logs(State(state): State<CoreState>) -> Json<ApiResponse<Vec<UiLogEvent>>> {
@@ -322,6 +366,14 @@ async fn update_rule(
     Path(id): Path<String>,
     Json(payload): Json<RuleUpsert>,
 ) -> impl IntoResponse {
+    if is_quickbar_managed_rule(&state, &id) {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "quick bar managed rules must be edited via /quickbar",
+        )
+        .into_response();
+    }
+
     let result = state.mutate_config(|cfg| {
         cfg.rules.iter_mut().find(|rule| rule.id == id).map(|rule| {
             rule.name = payload.name;
@@ -365,6 +417,14 @@ async fn update_rule(
 }
 
 async fn delete_rule(State(state): State<CoreState>, Path(id): Path<String>) -> impl IntoResponse {
+    if is_quickbar_managed_rule(&state, &id) {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "quick bar managed rules must be removed via /quickbar",
+        )
+        .into_response();
+    }
+
     let result = state.mutate_config(|cfg| {
         let before = cfg.rules.len();
         cfg.rules.retain(|rule| rule.id != id);
@@ -402,6 +462,105 @@ struct QuickBarUpsert {
     auto_bind_children: Option<bool>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TemplateApplyRequest {
+    proxy_profile: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TemplateApplyResult {
+    template_id: String,
+    added_rules: usize,
+    updated_rules: usize,
+}
+
+fn is_quickbar_managed_rule(state: &CoreState, rule_id: &str) -> bool {
+    state
+        .config
+        .read()
+        .rules
+        .iter()
+        .any(|rule| rule.id == rule_id && rule.source == RuleSource::QuickBar)
+}
+
+fn should_manage_quickbar_rule(item: &QuickBarItem) -> bool {
+    !matches!(item.start_mode, StartMode::StartOnly)
+}
+
+fn build_quickbar_managed_rule(item: &QuickBarItem) -> Rule {
+    let mut rule = Rule::new(
+        format!("Quick Bar: {}", item.name),
+        MatchCriteria {
+            exe_paths: vec![item.exe_path.clone()],
+            ..Default::default()
+        },
+        item.proxy_profile.clone(),
+    );
+    rule.source = RuleSource::QuickBar;
+    rule.managed_by_quickbar_id = Some(item.id.clone());
+    rule.auto_bind_children = item.auto_bind_children;
+    rule
+}
+
+fn sync_quickbar_managed_rule(cfg: &mut AppConfig, item: &QuickBarItem) {
+    if !should_manage_quickbar_rule(item) {
+        remove_quickbar_managed_rule(cfg, &item.id);
+        return;
+    }
+
+    if let Some(rule) = cfg.rules.iter_mut().find(|rule| {
+        rule.source == RuleSource::QuickBar
+            && rule.managed_by_quickbar_id.as_deref() == Some(item.id.as_str())
+    }) {
+        rule.name = format!("Quick Bar: {}", item.name);
+        rule.matcher = MatchCriteria {
+            exe_paths: vec![item.exe_path.clone()],
+            ..Default::default()
+        };
+        rule.proxy_profile = item.proxy_profile.clone();
+        rule.auto_bind_children = item.auto_bind_children;
+        rule.updated_at = Utc::now();
+        return;
+    }
+
+    cfg.rules.push(build_quickbar_managed_rule(item));
+}
+
+fn remove_quickbar_managed_rule(cfg: &mut AppConfig, quickbar_id: &str) -> bool {
+    let before = cfg.rules.len();
+    cfg.rules.retain(|rule| {
+        !(rule.source == RuleSource::QuickBar
+            && rule.managed_by_quickbar_id.as_deref() == Some(quickbar_id))
+    });
+    before != cfg.rules.len()
+}
+
+fn ai_dev_template_rules(proxy_profile: &str) -> Vec<Rule> {
+    [
+        ("AI IDE: VS Code", vec!["code.exe"]),
+        ("AI IDE: Code - Insiders", vec!["code - insiders.exe"]),
+        ("AI IDE: Cursor", vec!["cursor.exe"]),
+        ("AI IDE: Windsurf", vec!["windsurf.exe"]),
+        ("AI IDE: Node Toolchain", vec!["node.exe"]),
+        ("AI IDE: Chrome", vec!["chrome.exe"]),
+        ("AI IDE: Edge", vec!["msedge.exe"]),
+    ]
+    .into_iter()
+    .map(|(name, app_names)| {
+        Rule::new(
+            name.to_string(),
+            MatchCriteria {
+                app_names: app_names.into_iter().map(str::to_string).collect(),
+                ..Default::default()
+            },
+            proxy_profile.to_string(),
+        )
+    })
+    .collect()
+}
+
 async fn create_quickbar(
     State(state): State<CoreState>,
     Json(payload): Json<QuickBarUpsert>,
@@ -428,6 +587,7 @@ async fn create_quickbar(
 
     let result = state.mutate_config(|cfg| {
         cfg.quick_bar.push(item.clone());
+        sync_quickbar_managed_rule(cfg, &item);
         item.clone()
     });
 
@@ -455,7 +615,8 @@ async fn update_quickbar(
     }
 
     let result = state.mutate_config(|cfg| {
-        cfg.quick_bar
+        let saved = cfg
+            .quick_bar
             .iter_mut()
             .find(|item| item.id == id)
             .map(|item| {
@@ -476,7 +637,13 @@ async fn update_quickbar(
                     item.auto_bind_children = auto_bind_children;
                 }
                 item.clone()
-            })
+            });
+
+        if let Some(item) = saved.as_ref() {
+            sync_quickbar_managed_rule(cfg, item);
+        }
+
+        saved
     });
 
     match result {
@@ -500,6 +667,7 @@ async fn delete_quickbar(
     let result = state.mutate_config(|cfg| {
         let before = cfg.quick_bar.len();
         cfg.quick_bar.retain(|item| item.id != id);
+        remove_quickbar_managed_rule(cfg, &id);
         before != cfg.quick_bar.len()
     });
 
@@ -521,16 +689,20 @@ async fn launch_quickbar(
     State(state): State<CoreState>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    let item = state
-        .config
-        .read()
-        .quick_bar
-        .iter()
-        .find(|item| item.id == id)
-        .cloned();
+    let ensured = state.mutate_config(|cfg| {
+        let item = cfg.quick_bar.iter().find(|item| item.id == id).cloned();
+        if let Some(item) = item.as_ref() {
+            sync_quickbar_managed_rule(cfg, item);
+        }
+        item
+    });
 
-    let Some(item) = item else {
-        return err(StatusCode::NOT_FOUND, "quickbar item not found").into_response();
+    let item = match ensured {
+        Ok(Some(item)) => item,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "quickbar item not found").into_response(),
+        Err(error) => {
+            return err(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response();
+        }
     };
 
     match launch_quick_bar_item(&item) {
@@ -728,6 +900,69 @@ async fn update_runtime(
     }
 }
 
+async fn apply_ai_dev_template(
+    State(state): State<CoreState>,
+    Json(payload): Json<TemplateApplyRequest>,
+) -> impl IntoResponse {
+    let proxy_exists = state
+        .config
+        .read()
+        .proxies
+        .iter()
+        .any(|proxy| proxy.id == payload.proxy_profile);
+    if !proxy_exists {
+        return err(StatusCode::BAD_REQUEST, "proxy profile not found").into_response();
+    }
+
+    let result = state.mutate_config(|cfg| {
+        let mut added_rules = 0usize;
+        let mut updated_rules = 0usize;
+
+        for template_rule in ai_dev_template_rules(&payload.proxy_profile) {
+            if let Some(existing) = cfg
+                .rules
+                .iter_mut()
+                .find(|rule| rule.source == RuleSource::User && rule.name == template_rule.name)
+            {
+                existing.matcher = template_rule.matcher.clone();
+                existing.proxy_profile = template_rule.proxy_profile.clone();
+                existing.protocols = template_rule.protocols.clone();
+                existing.auto_bind_children = template_rule.auto_bind_children;
+                existing.force_dns = template_rule.force_dns;
+                existing.block_ipv6 = template_rule.block_ipv6;
+                existing.block_doh = template_rule.block_doh;
+                existing.enabled = true;
+                existing.updated_at = Utc::now();
+                updated_rules += 1;
+            } else {
+                cfg.rules.push(template_rule);
+                added_rules += 1;
+            }
+        }
+
+        TemplateApplyResult {
+            template_id: "ai-dev".to_string(),
+            added_rules,
+            updated_rules,
+        }
+    });
+
+    match result {
+        Ok(summary) => {
+            state.add_log(UiLogEvent::new(
+                "info",
+                "template",
+                format!(
+                    "applied ai-dev template: {} added, {} updated",
+                    summary.added_rules, summary.updated_rules
+                ),
+            ));
+            ok(summary).into_response()
+        }
+        Err(error) => err(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -736,7 +971,11 @@ mod tests {
     #[tokio::test]
     async fn test_health_handler() {
         let cfg = AppConfig::default();
-        let state = CoreState::new(std::env::temp_dir().join("test_health_handler.json5"), cfg);
+        let state = CoreState::new(
+            std::env::temp_dir().join("test_health_handler.json5"),
+            "test-token".to_string(),
+            cfg,
+        );
 
         let response = health(State(state)).await;
         assert!(response.0.ok);

@@ -1,3 +1,5 @@
+mod auth;
+
 use std::{collections::BTreeMap, time::Duration};
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -16,11 +18,20 @@ struct Cli {
     )]
     core_url: String,
 
-    #[arg(long, global = true)]
+    #[arg(long, global = true, conflicts_with = "format")]
     json: bool,
+
+    #[arg(long, global = true, value_enum)]
+    format: Option<OutputFormat>,
 
     #[command(subcommand)]
     command: Command,
+}
+
+impl Cli {
+    fn json_output(&self) -> bool {
+        self.json || matches!(self.format, Some(OutputFormat::Json))
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -195,6 +206,12 @@ enum SwitchState {
     Off,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum OutputFormat {
+    Text,
+    Json,
+}
+
 impl SwitchState {
     fn as_bool(self) -> bool {
         matches!(self, Self::On)
@@ -314,6 +331,8 @@ struct Rule {
     id: String,
     name: String,
     enabled: bool,
+    #[serde(default = "default_rule_source")]
+    source: String,
     matcher: MatchCriteria,
     proxy_profile: String,
     #[serde(default)]
@@ -351,6 +370,8 @@ struct RuntimeStats {
     rule_hits: BTreeMap<String, u64>,
     #[serde(default)]
     process_hits: BTreeMap<String, u64>,
+    #[serde(default)]
+    proxy_hits: BTreeMap<String, u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -386,6 +407,7 @@ struct StatusReport {
 
 struct ApiClient {
     base_url: String,
+    token: String,
     http: Client,
 }
 
@@ -398,6 +420,7 @@ impl ApiClient {
 
         Ok(Self {
             base_url: base_url.trim_end_matches('/').to_string(),
+            token: auth::load_or_create_token()?,
             http,
         })
     }
@@ -406,6 +429,7 @@ impl ApiClient {
         let response = self
             .http
             .get(self.url(path))
+            .header("X-SmartFlow-Token", &self.token)
             .send()
             .with_context(|| format!("request failed: GET {path}"))?;
         self.decode(response, path)
@@ -415,6 +439,7 @@ impl ApiClient {
         let response = self
             .http
             .post(self.url(path))
+            .header("X-SmartFlow-Token", &self.token)
             .json(&body)
             .send()
             .with_context(|| format!("request failed: POST {path}"))?;
@@ -425,6 +450,7 @@ impl ApiClient {
         let response = self
             .http
             .put(self.url(path))
+            .header("X-SmartFlow-Token", &self.token)
             .json(&body)
             .send()
             .with_context(|| format!("request failed: PUT {path}"))?;
@@ -435,6 +461,7 @@ impl ApiClient {
         let response = self
             .http
             .delete(self.url(path))
+            .header("X-SmartFlow-Token", &self.token)
             .send()
             .with_context(|| format!("request failed: DELETE {path}"))?;
         self.decode(response, path)
@@ -466,17 +493,18 @@ impl ApiClient {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let client = ApiClient::new(cli.core_url.clone())?;
+    let json_output = cli.json_output();
 
     match cli.command {
-        Command::Status => show_status(&client, cli.json),
+        Command::Status => show_status(&client, json_output),
         Command::Config => show_config(&client),
-        Command::Runtime { command } => handle_runtime(&client, command, cli.json),
-        Command::Mode { command } => handle_mode(&client, command, cli.json),
-        Command::Proxies { command } => handle_proxies(&client, command, cli.json),
-        Command::Rules { command } => handle_rules(&client, command, cli.json),
-        Command::Quickbar { command } => handle_quickbar(&client, command, cli.json),
-        Command::Processes { command } => handle_processes(&client, command, cli.json),
-        Command::Logs(args) => show_logs(&client, args.tail, cli.json),
+        Command::Runtime { command } => handle_runtime(&client, command, json_output),
+        Command::Mode { command } => handle_mode(&client, command, json_output),
+        Command::Proxies { command } => handle_proxies(&client, command, json_output),
+        Command::Rules { command } => handle_rules(&client, command, json_output),
+        Command::Quickbar { command } => handle_quickbar(&client, command, json_output),
+        Command::Processes { command } => handle_processes(&client, command, json_output),
+        Command::Logs(args) => show_logs(&client, args.tail, json_output),
     }
 }
 
@@ -736,14 +764,15 @@ fn handle_rules(client: &ApiClient, command: RuleCommand, json_output: bool) -> 
             }
 
             println!(
-                "{:<36}  {:<24}  {:<10}  {:<16}  {}",
-                "ID", "NAME", "ENABLED", "PROXY", "MATCHER"
+                "{:<36}  {:<24}  {:<10}  {:<10}  {:<16}  {}",
+                "ID", "NAME", "SOURCE", "ENABLED", "PROXY", "MATCHER"
             );
             for rule in rules {
                 println!(
-                    "{:<36}  {:<24}  {:<10}  {:<16}  {}",
+                    "{:<36}  {:<24}  {:<10}  {:<10}  {:<16}  {}",
                     rule.id,
                     truncate(&rule.name, 24),
+                    truncate(&rule.source, 10),
                     yes_no(rule.enabled),
                     truncate(&rule.proxy_profile, 16),
                     truncate(&matcher_summary(&rule.matcher), 64)
@@ -1047,6 +1076,10 @@ fn matcher_summary(matcher: &MatchCriteria) -> String {
     } else {
         parts.join(" ")
     }
+}
+
+fn default_rule_source() -> String {
+    "user".to_string()
 }
 
 fn yes_no(value: bool) -> &'static str {

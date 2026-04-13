@@ -1,18 +1,18 @@
 ﻿use anyhow::Result;
 
 use crate::{
-    engine::{proxifyre::ProxifyreBackend, ProxyEngine},
+    engine::{proxifyre::ProxifyreBackend, DataPlaneBackend, ProxyEngine},
     model::{AppConfig, EngineMode},
 };
 
 pub struct WfpEngine {
-    backend: ProxifyreBackend,
+    backend: Box<dyn DataPlaneBackend>,
 }
 
 impl Default for WfpEngine {
     fn default() -> Self {
         Self {
-            backend: ProxifyreBackend::new("wfp"),
+            backend: Box::new(ProxifyreBackend::new("wfp")),
         }
     }
 }

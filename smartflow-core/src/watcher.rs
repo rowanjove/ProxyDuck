@@ -1,10 +1,11 @@
 use std::{collections::HashSet, time::Duration};
 
+use chrono::Utc;
 use tokio::time;
 
 use crate::{
-    model::UiLogEvent,
-    process::{list_processes, rule_matches_process},
+    model::{MatchEvent, UiLogEvent},
+    process::{list_processes, resolve_matching_rule},
     state::CoreState,
 };
 
@@ -17,31 +18,46 @@ pub fn start_process_watcher(state: CoreState) {
             ticker.tick().await;
 
             let processes = list_processes();
-            let rules = state.config.read().rules.clone();
+            let config = state.config_snapshot();
+            let rules = config.rules;
+            let proxies = config.proxies;
 
             for process in processes {
                 if !seen.insert(process.pid) {
                     continue;
                 }
 
-                for rule in &rules {
-                    if rule_matches_process(rule, &process) {
-                        {
-                            let mut stats = state.stats.write();
-                            *stats.rule_hits.entry(rule.id.clone()).or_insert(0) += 1;
-                            *stats.process_hits.entry(process.name.clone()).or_insert(0) += 1;
-                        }
+                let Some(matched) = resolve_matching_rule(&rules, &process) else {
+                    continue;
+                };
 
-                        state.add_log(UiLogEvent::new(
-                            "info",
-                            "watcher",
-                            format!(
-                                "rule '{}' matched process {} (pid={})",
-                                rule.name, process.name, process.pid
-                            ),
-                        ));
-                    }
-                }
+                let proxy_name = proxies
+                    .iter()
+                    .find(|proxy| proxy.id == matched.rule.proxy_profile)
+                    .map(|proxy| proxy.name.clone())
+                    .unwrap_or_else(|| matched.rule.proxy_profile.clone());
+
+                state.record_match(MatchEvent {
+                    ts: Utc::now(),
+                    process_pid: process.pid,
+                    process_name: process.name.clone(),
+                    process_exe: process.exe.clone(),
+                    rule_id: matched.rule.id.clone(),
+                    rule_name: matched.rule.name.clone(),
+                    proxy_id: matched.rule.proxy_profile.clone(),
+                    proxy_name: proxy_name.clone(),
+                    source: matched.rule.source.clone(),
+                    match_kind: matched.match_kind.clone(),
+                });
+
+                state.add_log(UiLogEvent::new(
+                    "info",
+                    "watcher",
+                    format!(
+                        "rule '{}' matched process {} (pid={}) via {:?}",
+                        matched.rule.name, process.name, process.pid, matched.match_kind
+                    ),
+                ));
             }
         }
     });

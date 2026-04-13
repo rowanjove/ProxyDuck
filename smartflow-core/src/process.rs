@@ -3,7 +3,12 @@ use std::process::Command;
 use anyhow::{anyhow, Context, Result};
 use sysinfo::System;
 
-use crate::model::{ProcessInfo, QuickBarItem, Rule, StartMode};
+use crate::model::{MatchKind, ProcessInfo, QuickBarItem, Rule, StartMode};
+
+pub struct ResolvedRuleMatch<'a> {
+    pub rule: &'a Rule,
+    pub match_kind: MatchKind,
+}
 
 pub fn list_processes() -> Vec<ProcessInfo> {
     let mut system = System::new_all();
@@ -88,20 +93,55 @@ fn launch_as_admin(item: &QuickBarItem) -> Result<()> {
 }
 
 pub fn rule_matches_process(rule: &Rule, process: &ProcessInfo) -> bool {
+    rule_match_kind(rule, process).is_some()
+}
+
+pub fn resolve_matching_rule<'a>(
+    rules: &'a [Rule],
+    process: &ProcessInfo,
+) -> Option<ResolvedRuleMatch<'a>> {
+    let mut best: Option<ResolvedRuleMatch<'a>> = None;
+
+    for rule in rules.iter().filter(|rule| rule.enabled) {
+        let Some(match_kind) = rule_match_kind(rule, process) else {
+            continue;
+        };
+
+        let replace = match &best {
+            Some(current) => match_kind < current.match_kind,
+            None => true,
+        };
+
+        if replace {
+            best = Some(ResolvedRuleMatch { rule, match_kind });
+        }
+    }
+
+    best
+}
+
+pub fn rule_priority(rule: &Rule) -> MatchKind {
+    if !rule.matcher.pids.is_empty() {
+        MatchKind::Pid
+    } else if !rule.matcher.exe_paths.is_empty() {
+        MatchKind::ExePath
+    } else if !rule.matcher.app_names.is_empty() {
+        MatchKind::AppName
+    } else {
+        MatchKind::Wildcard
+    }
+}
+
+pub fn rule_match_kind(rule: &Rule, process: &ProcessInfo) -> Option<MatchKind> {
     if !rule.enabled {
-        return false;
+        return None;
     }
 
     let lower_name = process.name.to_lowercase();
     let lower_exe = process.exe.to_lowercase();
 
-    if rule
-        .matcher
-        .app_names
-        .iter()
-        .any(|name| lower_name.contains(&name.to_lowercase()))
-    {
-        return true;
+    if rule.matcher.pids.contains(&process.pid) {
+        return Some(MatchKind::Pid);
     }
 
     if rule
@@ -110,21 +150,26 @@ pub fn rule_matches_process(rule: &Rule, process: &ProcessInfo) -> bool {
         .iter()
         .any(|path| lower_exe.contains(&path.to_lowercase()))
     {
-        return true;
+        return Some(MatchKind::ExePath);
     }
 
-    if rule.matcher.pids.contains(&process.pid) {
-        return true;
+    if rule
+        .matcher
+        .app_names
+        .iter()
+        .any(|name| lower_name.contains(&name.to_lowercase()))
+    {
+        return Some(MatchKind::AppName);
     }
 
     if let Some(wildcard) = &rule.matcher.wildcard {
         let w = wildcard.to_lowercase();
         if lower_name.contains(&w) || lower_exe.contains(&w) {
-            return true;
+            return Some(MatchKind::Wildcard);
         }
     }
 
-    false
+    None
 }
 
 #[cfg(test)]
@@ -176,5 +221,37 @@ mod tests {
         rule.matcher.pids = vec![100];
         assert!(rule_matches_process(&rule, &p1));
         assert!(!rule_matches_process(&rule, &p2));
+    }
+
+    #[test]
+    fn pid_match_has_higher_priority_than_name_match() {
+        let process = ProcessInfo {
+            pid: 42,
+            name: "node.exe".to_string(),
+            exe: "C:\\Program Files\\nodejs\\node.exe".to_string(),
+        };
+
+        let name_rule = Rule::new(
+            "name".to_string(),
+            MatchCriteria {
+                app_names: vec!["node.exe".to_string()],
+                ..Default::default()
+            },
+            "proxy-a".to_string(),
+        );
+
+        let pid_rule = Rule::new(
+            "pid".to_string(),
+            MatchCriteria {
+                pids: vec![42],
+                ..Default::default()
+            },
+            "proxy-b".to_string(),
+        );
+
+        let rules = vec![name_rule, pid_rule];
+        let matched = resolve_matching_rule(&rules, &process).unwrap();
+        assert_eq!(matched.rule.name, "pid");
+        assert_eq!(matched.match_kind, MatchKind::Pid);
     }
 }

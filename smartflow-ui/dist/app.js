@@ -1,4 +1,5 @@
 let CORE_URL = "http://127.0.0.1:46666";
+let AUTH_TOKEN = "";
 let CONFIG_CACHE = null;
 let PROCESS_LIST_LOADED = false;
 let PROCESS_PANEL_OPEN = false;
@@ -23,11 +24,16 @@ async function invokeTauri(command, args = {}) {
 }
 
 async function request(path, method = "GET", body = null) {
+  const headers = {
+    "Content-Type": "application/json"
+  };
+  if (AUTH_TOKEN) {
+    headers["X-SmartFlow-Token"] = AUTH_TOKEN;
+  }
+
   const response = await fetch(`${CORE_URL}${path}`, {
     method,
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers,
     body: body ? JSON.stringify(body) : undefined
   });
 
@@ -147,6 +153,7 @@ function renderRules(rules) {
   tbody.innerHTML = "";
 
   for (const rule of rules) {
+    const managed = rule.source === "quick_bar";
     const matcher =
       [
         ...(rule.matcher?.appNames || []),
@@ -158,16 +165,58 @@ function renderRules(rules) {
     tr.innerHTML = `
       <td>${escapeHtml(rule.name)}</td>
       <td>${escapeHtml(matcher)}</td>
+      <td>${escapeHtml(rule.source || "user")}</td>
       <td>${escapeHtml(rule.proxyProfile)}</td>
       <td>${escapeHtml((rule.protocols || []).join("/"))}</td>
       <td>${rule.enabled ? "启用" : "禁用"}</td>
       <td>
-        <button data-action="toggle-rule" data-id="${escapeHtml(rule.id)}">${rule.enabled ? "禁用" : "启用"}</button>
-        <button data-action="delete-rule" data-id="${escapeHtml(rule.id)}" class="danger">删除</button>
+        <button data-action="toggle-rule" data-id="${escapeHtml(rule.id)}" ${managed ? "disabled" : ""}>${managed ? "托管" : (rule.enabled ? "禁用" : "启用")}</button>
+        <button data-action="delete-rule" data-id="${escapeHtml(rule.id)}" class="danger" ${managed ? "disabled" : ""}>${managed ? "托管" : "删除"}</button>
       </td>
     `;
     tbody.appendChild(tr);
   }
+}
+
+function formatTopList(items, labelKey, countKey = "hits", limit = 5) {
+  if (!items.length) {
+    return "none";
+  }
+
+  return items
+    .slice(0, limit)
+    .map((item) => `${item[labelKey]} (${item[countKey]})`)
+    .join("\n");
+}
+
+function renderStatsSummary(stats, ruleStats, proxyStats, recentHits) {
+  const recent = recentHits
+    .slice(-8)
+    .reverse()
+    .map((hit) => `${hit.processName} -> ${hit.ruleName} -> ${hit.proxyName} [${hit.matchKind}]`)
+    .join("\n") || "none";
+
+  const topProcesses = Object.entries(stats.processHits || {})
+    .sort((left, right) => right[1] - left[1])
+    .map(([name, hits]) => ({ name, hits }));
+
+  return [
+    `engine: ${stats.engineMode}`,
+    `startedAt: ${stats.startedAt || "never"}`,
+    `lastReloadAt: ${stats.lastReloadAt || "never"}`,
+    "",
+    "top rules:",
+    formatTopList(ruleStats, "ruleName"),
+    "",
+    "top proxies:",
+    formatTopList(proxyStats, "proxyName"),
+    "",
+    "top processes:",
+    formatTopList(topProcesses, "name"),
+    "",
+    "recent hits:",
+    recent
+  ].join("\n");
 }
 
 function renderQuickBar(items) {
@@ -361,8 +410,14 @@ async function loadProcessList() {
 }
 
 async function loadStatsAndLogs() {
-  const [stats, logs] = await Promise.all([request("/stats"), request("/logs")]);
-  $("statsBox").textContent = JSON.stringify(stats, null, 2);
+  const [stats, ruleStats, proxyStats, recentHits, logs] = await Promise.all([
+    request("/stats"),
+    request("/stats/rules"),
+    request("/stats/proxies"),
+    request("/stats/hits"),
+    request("/logs")
+  ]);
+  $("statsBox").textContent = renderStatsSummary(stats, ruleStats, proxyStats, recentHits);
   $("logBox").textContent = logs
     .slice(-80)
     .map((log) => `[${log.ts}] [${log.level}] [${log.source}] ${log.message}`)
@@ -424,6 +479,18 @@ function bindEvents() {
   $("quickLaunchAddBtn")?.addEventListener("click", () => {
     $("quickBarCard")?.scrollIntoView({ behavior: "smooth", block: "start" });
     $("qbName")?.focus();
+  });
+
+  $("applyAiTemplateBtn")?.addEventListener("click", async () => {
+    const proxyProfile = $("ruleProxy").value || $("qbProxy").value;
+    if (!proxyProfile) {
+      setHealthBadge(false, "请先创建可用代理");
+      return;
+    }
+
+    await request("/templates/ai-dev", "POST", { proxyProfile });
+    toast("AI 开发模板已导入");
+    await refreshAll();
   });
 
   $("proxyForm").addEventListener("submit", async (event) => {
@@ -606,7 +673,9 @@ async function init() {
 
   try {
     if (window.__TAURI__) {
-      CORE_URL = await invokeTauri("get_core_url");
+      const session = await invokeTauri("get_core_session");
+      CORE_URL = session.coreUrl;
+      AUTH_TOKEN = session.token;
       const enabled = await invokeTauri("get_runtime_enabled");
       $("runtimeEnabled").checked = enabled;
     }

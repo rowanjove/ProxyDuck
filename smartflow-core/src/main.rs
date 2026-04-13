@@ -1,4 +1,5 @@
 mod api;
+mod auth;
 mod config;
 mod engine;
 mod model;
@@ -42,8 +43,9 @@ async fn main() -> Result<()> {
         None => config::resolve_config_path()?,
     };
 
+    let auth_token = auth::load_or_create_token()?;
     let cfg = config::load_or_init(&config_path)?;
-    let state = CoreState::new(config_path, cfg);
+    let state = CoreState::new(config_path, auth_token, cfg);
     state.add_log(UiLogEvent::new(
         "info",
         "bootstrap",

@@ -3,6 +3,8 @@
     windows_subsystem = "windows"
 )]
 
+mod auth;
+
 use std::{
     env,
     path::PathBuf,
@@ -15,6 +17,7 @@ use std::{
 use std::os::windows::process::CommandExt;
 
 use reqwest::StatusCode;
+use serde::Serialize;
 use serde_json::json;
 use single_instance::SingleInstance;
 use tauri::{
@@ -27,12 +30,28 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 struct RuntimeState {
     core_url: String,
+    token: String,
     enabled: Mutex<bool>,
 }
 
 #[tauri::command]
 fn get_core_url(state: State<'_, RuntimeState>) -> String {
     state.core_url.clone()
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CoreSession {
+    core_url: String,
+    token: String,
+}
+
+#[tauri::command]
+fn get_core_session(state: State<'_, RuntimeState>) -> CoreSession {
+    CoreSession {
+        core_url: state.core_url.clone(),
+        token: state.token.clone(),
+    }
 }
 
 #[tauri::command]
@@ -45,18 +64,20 @@ fn get_runtime_enabled(state: State<'_, RuntimeState>) -> Result<bool, String> {
 
 #[tauri::command]
 fn set_runtime_enabled(enabled: bool, state: State<'_, RuntimeState>) -> Result<(), String> {
-    post_runtime_toggle(&state.core_url, enabled).map_err(|error| error.to_string())?;
+    post_runtime_toggle(&state.core_url, &state.token, enabled)
+        .map_err(|error| error.to_string())?;
     *state.enabled.lock().map_err(|_| "runtime mutex poisoned")? = enabled;
     Ok(())
 }
 
-fn post_runtime_toggle(core_url: &str, enabled: bool) -> anyhow::Result<()> {
+fn post_runtime_toggle(core_url: &str, token: &str, enabled: bool) -> anyhow::Result<()> {
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(3))
         .build()?;
 
     let response = client
         .post(format!("{core_url}/runtime"))
+        .header("X-SmartFlow-Token", token)
         .json(&json!({ "enabled": enabled }))
         .send()?;
 
@@ -67,7 +88,7 @@ fn post_runtime_toggle(core_url: &str, enabled: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn check_core_health(core_url: &str) -> bool {
+fn check_core_health(core_url: &str, token: &str) -> bool {
     let client = match reqwest::blocking::Client::builder()
         .timeout(Duration::from_millis(800))
         .build()
@@ -76,14 +97,18 @@ fn check_core_health(core_url: &str) -> bool {
         Err(_) => return false,
     };
 
-    match client.get(format!("{core_url}/health")).send() {
+    match client
+        .get(format!("{core_url}/health"))
+        .header("X-SmartFlow-Token", token)
+        .send()
+    {
         Ok(response) => response.status().is_success(),
         Err(_) => false,
     }
 }
 
-fn spawn_core_if_needed(core_url: &str) {
-    if check_core_health(core_url) {
+fn spawn_core_if_needed(core_url: &str, token: &str) {
+    if check_core_health(core_url, token) {
         return;
     }
 
@@ -163,8 +188,17 @@ fn main() {
         .add_native_item(SystemTrayMenuItem::Separator)
         .add_item(quit_item);
 
+    let token = match auth::load_or_create_token() {
+        Ok(token) => token,
+        Err(error) => {
+            eprintln!("failed to initialize SmartFlow auth token: {error}");
+            return;
+        }
+    };
+
     let runtime_state = RuntimeState {
         core_url: core_url.clone(),
+        token,
         enabled: Mutex::new(true),
     };
 
@@ -172,11 +206,13 @@ fn main() {
         .manage(runtime_state)
         .invoke_handler(tauri::generate_handler![
             get_core_url,
+            get_core_session,
             get_runtime_enabled,
             set_runtime_enabled
         ])
-        .setup(move |_| {
-            spawn_core_if_needed(&core_url);
+        .setup(move |app| {
+            let state = app.state::<RuntimeState>();
+            spawn_core_if_needed(&core_url, &state.token);
             Ok(())
         })
         .system_tray(SystemTray::new().with_menu(tray_menu))
@@ -209,7 +245,7 @@ fn main() {
                         };
 
                         let next = !*lock;
-                        if post_runtime_toggle(&state.core_url, next).is_ok() {
+                        if post_runtime_toggle(&state.core_url, &state.token, next).is_ok() {
                             *lock = next;
                             let title = if next {
                                 "暂停 SmartFlow"

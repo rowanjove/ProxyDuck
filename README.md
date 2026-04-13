@@ -21,7 +21,8 @@ SmartFlow is open source under the MIT License.
 
 - Proxy profiles (default: Clash Verge `127.0.0.1:7897`)
 - Rule management (app name/path/PID matching)
-- Quick Bar launch and bind
+- Quick Bar launch and bind with managed EXE rules
+- AI IDE preset import for VS Code, Cursor, Windsurf, Node.js, Chrome, and Edge
 - Engine mode switch (`win_divert`, `wfp`, `api_hook`) with shared backend lifecycle
 - Real-time process view, rule hit stats, and logs
 - Tray resident UI
@@ -68,6 +69,7 @@ Notes:
 - Run as **Administrator** for full enforcement/firewall rule operations.
 - Runtime hardening firewall rules are applied only when at least one SOCKS5 endpoint is reachable.
 - New default config starts with `runtime.enabled = false` for safer first launch.
+- Core HTTP requests require `X-SmartFlow-Token`; SmartFlow writes the token to `%APPDATA%\SmartFlow\token` and the bundled UI/CLI load it automatically.
 - The source repo and default release output do **not** bundle ProxiFyre binaries.
 - If local builds fail with missing `kernel32.lib` / `stddef.h`, install the Windows SDK component for Visual Studio Build Tools.
 - `smartflow-core` searches ProxiFyre in this order:
@@ -94,12 +96,18 @@ Base URL: `http://127.0.0.1:46666`
 - `POST /engine/mode`
 - `POST /runtime`
 - `GET /stats`
+- `GET /stats/rules`
+- `GET /stats/proxies`
+- `GET /stats/hits`
 - `GET /logs`
+- `POST /templates/ai-dev`
 
 ## CLI
 
 `smartflow-cli` talks to the local core HTTP API and is useful for scripts,
 PowerShell workflows, and headless machines.
+
+Use `--format json` (or the legacy `--json`) for structured automation output.
 
 Examples:
 
@@ -150,7 +158,8 @@ SmartFlow 以 MIT License 开源。
 
 - 代理配置管理（默认：Clash Verge `127.0.0.1:7897`）
 - 规则管理（支持进程名/路径/PID 匹配）
-- Quick Bar 一键启动并绑定代理
+- Quick Bar 一键启动并绑定代理，并同步托管 EXE 规则
+- 一键导入 AI IDE 预设（VS Code、Cursor、Windsurf、Node、Chrome、Edge）
 - 引擎模式切换（`win_divert`、`wfp`、`api_hook`），共享后端生命周期
 - 实时进程视图、规则命中统计、日志查看
 - 托盘常驻 UI
@@ -196,6 +205,7 @@ SmartFlow 以 MIT License 开源。
 - 建议使用 **管理员权限** 运行，以获得完整接管/防火墙规则能力。
 - 仅当至少一个 SOCKS5 端点可达时，运行时加固防火墙规则才会应用。
 - 新默认配置中 `runtime.enabled = false`，用于首次启动安全兜底。
+- Core HTTP 请求需要携带 `X-SmartFlow-Token`；SmartFlow 会把 token 写入 `%APPDATA%\SmartFlow\token`，打包后的 UI/CLI 会自动读取。
 - 源码仓库和默认 release 输出都**不会**直接捆绑 ProxiFyre 二进制。
 - 如果本地构建报 `kernel32.lib` 或 `stddef.h` 缺失，请在 Visual Studio Build Tools 中安装 Windows SDK 组件。
 - `smartflow-core` 会按以下顺序查找 ProxiFyre：
@@ -222,11 +232,17 @@ SmartFlow 以 MIT License 开源。
 - `POST /engine/mode`
 - `POST /runtime`
 - `GET /stats`
+- `GET /stats/rules`
+- `GET /stats/proxies`
+- `GET /stats/hits`
 - `GET /logs`
+- `POST /templates/ai-dev`
 
 ### CLI
 
 `smartflow-cli` 直接连接本地 core HTTP API，适合脚本、PowerShell 自动化和无界面环境。
+
+结构化输出可使用 `--format json`（兼容保留 `--json`）。
 
 示例：
 

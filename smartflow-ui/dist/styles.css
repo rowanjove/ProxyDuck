@@ -162,6 +162,18 @@ main {
   line-height: 1.2;
 }
 
+.card-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: -2px 0 10px;
+}
+
+.card-note {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .card h3 {
   margin: 0 0 6px;
   font-size: 13px;
@@ -243,11 +255,17 @@ button:hover {
   filter: brightness(1.05);
 }
 
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  filter: none;
+}
+
 button.danger {
   background: var(--danger);
 }
 
-.header-actions .secondary {
+button.secondary {
   color: var(--text);
   border: 1px solid var(--line);
   background: linear-gradient(180deg, var(--secondary-from), var(--secondary-to));
@@ -339,32 +357,37 @@ td {
 
 #ruleCard th:nth-child(1),
 #ruleCard td:nth-child(1) {
-  width: 18%;
+  width: 16%;
 }
 
 #ruleCard th:nth-child(2),
 #ruleCard td:nth-child(2) {
-  width: 30%;
+  width: 28%;
 }
 
 #ruleCard th:nth-child(3),
 #ruleCard td:nth-child(3) {
-  width: 15%;
+  width: 10%;
 }
 
 #ruleCard th:nth-child(4),
 #ruleCard td:nth-child(4) {
-  width: 12%;
+  width: 14%;
 }
 
 #ruleCard th:nth-child(5),
 #ruleCard td:nth-child(5) {
-  width: 9%;
+  width: 12%;
 }
 
 #ruleCard th:nth-child(6),
 #ruleCard td:nth-child(6) {
-  width: 16%;
+  width: 8%;
+}
+
+#ruleCard th:nth-child(7),
+#ruleCard td:nth-child(7) {
+  width: 12%;
 }
 
 tbody tr:last-child td {

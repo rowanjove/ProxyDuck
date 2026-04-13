@@ -1,18 +1,18 @@
 ﻿use anyhow::Result;
 
 use crate::{
-    engine::{proxifyre::ProxifyreBackend, ProxyEngine},
+    engine::{proxifyre::ProxifyreBackend, DataPlaneBackend, ProxyEngine},
     model::{AppConfig, EngineMode},
 };
 
 pub struct ApiHookEngine {
-    backend: ProxifyreBackend,
+    backend: Box<dyn DataPlaneBackend>,
 }
 
 impl Default for ApiHookEngine {
     fn default() -> Self {
         Self {
-            backend: ProxifyreBackend::new("api_hook"),
+            backend: Box::new(ProxifyreBackend::new("api_hook")),
         }
     }
 }

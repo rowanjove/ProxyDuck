@@ -1,18 +1,18 @@
 ﻿use anyhow::Result;
 
 use crate::{
-    engine::{proxifyre::ProxifyreBackend, ProxyEngine},
+    engine::{proxifyre::ProxifyreBackend, DataPlaneBackend, ProxyEngine},
     model::{AppConfig, EngineMode},
 };
 
 pub struct WinDivertEngine {
-    backend: ProxifyreBackend,
+    backend: Box<dyn DataPlaneBackend>,
 }
 
 impl Default for WinDivertEngine {
     fn default() -> Self {
         Self {
-            backend: ProxifyreBackend::new("windivert"),
+            backend: Box::new(ProxifyreBackend::new("windivert")),
         }
     }
 }

@@ -15,6 +15,12 @@ pub use api_hook::ApiHookEngine;
 pub use wfp::WfpEngine;
 pub use windivert::WinDivertEngine;
 
+pub trait DataPlaneBackend: Send + Sync {
+    fn start(&self, config: &AppConfig) -> Result<()>;
+    fn stop(&self) -> Result<()>;
+    fn reload(&self, config: &AppConfig) -> Result<()>;
+}
+
 pub trait ProxyEngine: Send + Sync {
     fn mode(&self) -> EngineMode;
     fn start(&self, config: &AppConfig) -> Result<()>;

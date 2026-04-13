@@ -13,9 +13,9 @@ use parking_lot::{Mutex, RwLock};
 use serde::Serialize;
 
 use crate::{
-    engine::validate_clash_profile,
+    engine::{validate_clash_profile, DataPlaneBackend},
     model::{AppConfig, Protocol, ProxyKind, Rule},
-    process::list_processes,
+    process::{list_processes, rule_priority},
 };
 
 const PROXIFYRE_EXE: &str = "ProxiFyre.exe";
@@ -240,9 +240,19 @@ impl ProxifyreBackend {
         let running_processes = list_processes();
         let mut proxies = Vec::new();
         let mut excludes = HashSet::new();
+        let mut claimed_patterns = HashSet::new();
+        let mut sorted_rules = config
+            .rules
+            .iter()
+            .filter(|rule| rule.enabled)
+            .collect::<Vec<_>>();
+        sorted_rules.sort_by_key(|rule| rule_priority(rule));
 
-        for rule in config.rules.iter().filter(|rule| rule.enabled) {
-            let patterns = rule_patterns(rule, &running_processes);
+        for rule in sorted_rules {
+            let patterns = rule_patterns(rule, &running_processes)
+                .into_iter()
+                .filter(|pattern| claimed_patterns.insert(pattern.to_ascii_lowercase()))
+                .collect::<Vec<_>>();
             if patterns.is_empty() {
                 continue;
             }
@@ -410,6 +420,20 @@ impl ProxifyreBackend {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
+    }
+}
+
+impl DataPlaneBackend for ProxifyreBackend {
+    fn start(&self, config: &AppConfig) -> Result<()> {
+        ProxifyreBackend::start(self, config)
+    }
+
+    fn stop(&self) -> Result<()> {
+        ProxifyreBackend::stop(self)
+    }
+
+    fn reload(&self, config: &AppConfig) -> Result<()> {
+        ProxifyreBackend::reload(self, config)
     }
 }
 

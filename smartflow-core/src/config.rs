@@ -9,13 +9,17 @@ const APP_VENDOR: &str = "SmartFlow";
 const APP_NAME: &str = "SmartFlow";
 const CONFIG_FILE: &str = "config.json5";
 
-pub fn resolve_config_path() -> Result<PathBuf> {
+pub fn resolve_app_dir() -> Result<PathBuf> {
     let dirs = ProjectDirs::from("com", APP_VENDOR, APP_NAME)
         .context("unable to resolve app data directory")?;
     let config_dir = dirs.config_dir();
     fs::create_dir_all(config_dir)
         .with_context(|| format!("failed to create config dir {}", config_dir.display()))?;
-    Ok(config_dir.join(CONFIG_FILE))
+    Ok(config_dir.to_path_buf())
+}
+
+pub fn resolve_config_path() -> Result<PathBuf> {
+    Ok(resolve_app_dir()?.join(CONFIG_FILE))
 }
 
 pub fn load_or_init(path: &PathBuf) -> Result<AppConfig> {

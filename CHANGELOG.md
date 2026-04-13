@@ -4,6 +4,26 @@ All notable changes to SmartFlow will be documented in this file.
 
 The project is open source under the MIT License.
 
+## 0.3.0 - 2026-04-13
+
+### Added
+
+- Added per-user local API token authentication, with the token stored in the SmartFlow app data directory and auto-loaded by the desktop UI and CLI.
+- Added observability endpoints for rule hits, proxy hits, and recent match events, plus a richer dashboard summary in the Tauri UI.
+- Added an `AI 开发模板` quick action that can seed common IDE, Node.js, and browser proxy rules in one step.
+- Added a `--format json` CLI option while keeping `--json` as a compatibility shortcut.
+
+### Changed
+
+- Quick Bar bind modes now synchronize managed EXE rules so `start_and_bind` and `bind_only` produce an actual runtime binding instead of a launcher-only action.
+- Rule matching now follows an explicit priority order: PID > EXE path > app name > wildcard.
+- Internal engine wiring now depends on a dedicated data-plane backend trait so alternate backends and test doubles can be slotted in with lower coupling.
+
+### Fixed
+
+- Blocked direct edits and deletes of Quick Bar managed rules from the generic rule endpoints to prevent UI/API drift.
+- Stopped duplicate lower-priority rule patterns from shadowing higher-priority bindings in the generated ProxiFyre runtime config.
+
 ## 0.2.0 - 2026-04-13
 
 ### Added

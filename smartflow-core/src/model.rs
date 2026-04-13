@@ -62,12 +62,33 @@ pub enum Protocol {
     Dns,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleSource {
+    #[default]
+    User,
+    QuickBar,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum MatchKind {
+    Pid,
+    ExePath,
+    AppName,
+    Wildcard,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Rule {
     pub id: String,
     pub name: String,
     pub enabled: bool,
+    #[serde(default)]
+    pub source: RuleSource,
+    #[serde(default)]
+    pub managed_by_quickbar_id: Option<String>,
     pub matcher: MatchCriteria,
     pub proxy_profile: String,
     pub protocols: Vec<Protocol>,
@@ -86,6 +107,8 @@ impl Rule {
             id: Uuid::new_v4().to_string(),
             name,
             enabled: true,
+            source: RuleSource::User,
+            managed_by_quickbar_id: None,
             matcher,
             proxy_profile,
             protocols: vec![Protocol::Tcp, Protocol::Udp, Protocol::Dns],
@@ -182,7 +205,7 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            version: "0.2.0".to_string(),
+            version: "0.3.0".to_string(),
             engine_mode: EngineMode::WinDivert,
             proxies: vec![ProxyProfile::clash_default()],
             rules: Vec::new(),
@@ -202,6 +225,8 @@ pub struct RuntimeStats {
     pub rule_hits: HashMap<String, u64>,
     #[serde(default)]
     pub process_hits: HashMap<String, u64>,
+    #[serde(default)]
+    pub proxy_hits: HashMap<String, u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -244,6 +269,40 @@ pub struct HealthStatus {
     pub engine_mode: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchEvent {
+    pub ts: DateTime<Utc>,
+    pub process_pid: u32,
+    pub process_name: String,
+    pub process_exe: String,
+    pub rule_id: String,
+    pub rule_name: String,
+    pub proxy_id: String,
+    pub proxy_name: String,
+    pub source: RuleSource,
+    pub match_kind: MatchKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleHitStat {
+    pub rule_id: String,
+    pub rule_name: String,
+    pub proxy_id: String,
+    pub proxy_name: String,
+    pub source: RuleSource,
+    pub hits: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyHitStat {
+    pub proxy_id: String,
+    pub proxy_name: String,
+    pub hits: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -278,6 +337,8 @@ mod tests {
         assert!(rule.force_dns);
         assert!(rule.block_ipv6);
         assert!(rule.block_doh);
+        assert_eq!(rule.source, RuleSource::User);
+        assert!(rule.managed_by_quickbar_id.is_none());
     }
 
     #[test]

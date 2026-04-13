@@ -71,16 +71,20 @@
 
       <section id="ruleCard" class="card">
         <h2>进程规则</h2>
+        <div class="card-actions">
+          <button id="applyAiTemplateBtn" class="secondary" type="button">导入 AI 开发模板</button>
+        </div>
         <form id="ruleForm" class="grid four">
           <input id="ruleName" placeholder="规则名" required />
           <input id="ruleMatch" placeholder="进程名/路径关键字" required />
           <select id="ruleProxy"></select>
           <button type="submit">添加规则</button>
         </form>
+        <p class="card-note">规则优先级：PID &gt; EXE 路径 &gt; 应用名 &gt; 通配。Quick Bar 的 bind 模式会自动生成托管规则。</p>
         <div class="table-wrap">
           <table id="ruleTable">
             <thead>
-              <tr><th>规则</th><th>匹配</th><th>代理</th><th>协议</th><th>开关</th><th>操作</th></tr>
+              <tr><th>规则</th><th>匹配</th><th>来源</th><th>代理</th><th>协议</th><th>开关</th><th>操作</th></tr>
             </thead>
             <tbody></tbody>
           </table>
@@ -89,6 +93,7 @@
 
       <section id="quickBarCard" class="card">
         <h2>Quick Bar</h2>
+        <p class="card-note"><code>start_and_bind</code> / <code>bind_only</code> 会同步一个 EXE 托管规则；<code>start_only</code> 只负责启动。</p>
         <form id="quickBarForm" class="grid four">
           <input id="qbName" placeholder="名称" required />
           <input id="qbExe" placeholder="EXE 路径" required />

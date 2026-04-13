@@ -1,6 +1,6 @@
 [package]
 name = "smartflow-ui"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license.workspace = true
 authors.workspace = true
@@ -10,8 +10,10 @@ tauri-build = { version = "1.5", features = [] }
 
 [dependencies]
 anyhow = "1.0"
+directories = "5.0"
 reqwest = { version = "0.12", features = ["json", "blocking", "rustls-tls"], default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 single-instance = "0.3"
 tauri = { version = "1.8", features = ["api-all", "system-tray"] }
+uuid = { version = "1.11", features = ["v4"] }
