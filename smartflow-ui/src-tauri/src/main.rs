@@ -4,7 +4,6 @@
 )]
 
 use std::{
-    collections::HashMap,
     env,
     path::PathBuf,
     process::{Command, Stdio},
@@ -29,7 +28,6 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 struct RuntimeState {
     core_url: String,
     enabled: Mutex<bool>,
-    icon_cache: Mutex<HashMap<String, String>>,
 }
 
 #[tauri::command]
@@ -38,8 +36,11 @@ fn get_core_url(state: State<'_, RuntimeState>) -> String {
 }
 
 #[tauri::command]
-fn get_runtime_enabled(state: State<'_, RuntimeState>) -> bool {
-    *state.enabled.lock().expect("runtime mutex poisoned")
+fn get_runtime_enabled(state: State<'_, RuntimeState>) -> Result<bool, String> {
+    match state.enabled.lock() {
+        Ok(guard) => Ok(*guard),
+        Err(_) => Err("runtime mutex poisoned".to_string()),
+    }
 }
 
 #[tauri::command]
@@ -47,90 +48,6 @@ fn set_runtime_enabled(enabled: bool, state: State<'_, RuntimeState>) -> Result<
     post_runtime_toggle(&state.core_url, enabled).map_err(|error| error.to_string())?;
     *state.enabled.lock().map_err(|_| "runtime mutex poisoned")? = enabled;
     Ok(())
-}
-
-#[tauri::command]
-fn get_exe_icon_data_url(exe_path: String, state: State<'_, RuntimeState>) -> Result<String, String> {
-    #[cfg(target_os = "windows")]
-    {
-        let normalized_path = exe_path.trim();
-        if normalized_path.is_empty() {
-            return Err("exe path is empty".to_string());
-        }
-
-        if let Ok(cache) = state.icon_cache.lock() {
-            if let Some(icon) = cache.get(normalized_path) {
-                return Ok(icon.clone());
-            }
-        }
-
-        let script = r#"
-$ErrorActionPreference='Stop'
-Add-Type -AssemblyName System.Drawing
-$p=$env:SMARTFLOW_ICON_PATH
-if ([string]::IsNullOrWhiteSpace($p)) { throw 'empty exe path' }
-if (!(Test-Path -LiteralPath $p)) { throw 'exe path not found' }
-$icon=[System.Drawing.Icon]::ExtractAssociatedIcon($p)
-if ($null -eq $icon) { throw 'icon not found' }
-$bmp=$icon.ToBitmap()
-$ms=New-Object System.IO.MemoryStream
-try {
-  $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
-  [Convert]::ToBase64String($ms.ToArray())
-} finally {
-  $ms.Dispose()
-  $bmp.Dispose()
-  $icon.Dispose()
-}
-"#;
-
-        let mut command = Command::new("powershell");
-        command
-            .arg("-NoProfile")
-            .arg("-NonInteractive")
-            .arg("-ExecutionPolicy")
-            .arg("Bypass")
-            .arg("-Command")
-            .arg(script)
-            .env("SMARTFLOW_ICON_PATH", normalized_path)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .stdin(Stdio::null());
-
-        #[cfg(target_os = "windows")]
-        {
-            command.creation_flags(CREATE_NO_WINDOW);
-        }
-
-        let output = command
-            .output()
-            .map_err(|error| format!("failed to resolve icon: {error}"))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("icon extract failed: {}", stderr.trim()));
-        }
-
-        let icon_base64 = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if icon_base64.is_empty() {
-            return Err("icon extract returned empty output".to_string());
-        }
-
-        let data_url = format!("data:image/png;base64,{icon_base64}");
-
-        if let Ok(mut cache) = state.icon_cache.lock() {
-            cache.insert(normalized_path.to_string(), data_url.clone());
-        }
-
-        Ok(data_url)
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = exe_path;
-        let _ = state;
-        Err("exe icon is only supported on Windows".to_string())
-    }
 }
 
 fn post_runtime_toggle(core_url: &str, enabled: bool) -> anyhow::Result<()> {
@@ -249,7 +166,6 @@ fn main() {
     let runtime_state = RuntimeState {
         core_url: core_url.clone(),
         enabled: Mutex::new(true),
-        icon_cache: Mutex::new(HashMap::new()),
     };
 
     tauri::Builder::default()
@@ -257,8 +173,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_core_url,
             get_runtime_enabled,
-            set_runtime_enabled,
-            get_exe_icon_data_url
+            set_runtime_enabled
         ])
         .setup(move |_| {
             spawn_core_if_needed(&core_url);
@@ -312,5 +227,5 @@ fn main() {
             }
         })
         .run(tauri::generate_context!())
-        .expect("failed to run SmartFlow UI");
+        .unwrap_or_else(|error| eprintln!("failed to run SmartFlow UI: {error}"));
 }

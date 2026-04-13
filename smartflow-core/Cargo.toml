@@ -1,7 +1,9 @@
 [package]
 name = "smartflow-core"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
+license.workspace = true
+authors.workspace = true
 
 [dependencies]
 anyhow = "1.0"
@@ -26,6 +28,7 @@ sysinfo = "0.33"
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.59", features = [
   "Win32_Foundation",
+  "Win32_Storage_FileSystem",
   "Win32_Security",
   "Win32_System_Threading",
   "Win32_System_Diagnostics_ToolHelp"

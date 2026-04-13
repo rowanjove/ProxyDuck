@@ -182,7 +182,7 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            version: "0.1.0".to_string(),
+            version: "0.2.0".to_string(),
             engine_mode: EngineMode::WinDivert,
             proxies: vec![ProxyProfile::clash_default()],
             rules: Vec::new(),
@@ -242,4 +242,57 @@ pub struct HealthStatus {
     pub status: String,
     pub version: String,
     pub engine_mode: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_proxy_profile_clash_default() {
+        let default = ProxyProfile::clash_default();
+        assert_eq!(default.id, "clash-socks");
+        assert_eq!(default.endpoint, "127.0.0.1:7897");
+        assert!(default.enabled);
+    }
+
+    #[test]
+    fn test_rule_new() {
+        let matcher = MatchCriteria {
+            app_names: vec!["test.exe".to_string()],
+            ..Default::default()
+        };
+        let rule = Rule::new(
+            "my-rule".to_string(),
+            matcher.clone(),
+            "clash-socks".to_string(),
+        );
+
+        assert_eq!(rule.name, "my-rule");
+        assert_eq!(rule.proxy_profile, "clash-socks");
+        assert_eq!(rule.matcher.app_names.len(), 1);
+        assert!(rule.enabled);
+        assert!(!rule.id.is_empty());
+        assert_eq!(rule.protocols.len(), 3);
+        assert!(rule.auto_bind_children);
+        assert!(rule.force_dns);
+        assert!(rule.block_ipv6);
+        assert!(rule.block_doh);
+    }
+
+    #[test]
+    fn test_quick_bar_item_new() {
+        let qb = QuickBarItem::new(
+            "my-app".to_string(),
+            "C:\\app.exe".to_string(),
+            "clash-socks".to_string(),
+        );
+        assert_eq!(qb.name, "my-app");
+        assert_eq!(qb.exe_path, "C:\\app.exe");
+        assert_eq!(qb.proxy_profile, "clash-socks");
+        assert!(!qb.id.is_empty());
+        assert!(matches!(qb.start_mode, StartMode::StartAndBind));
+        assert!(!qb.run_as_admin);
+        assert!(qb.auto_bind_children);
+    }
 }

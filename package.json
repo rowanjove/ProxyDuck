@@ -1,14 +1,15 @@
 {
   "name": "daili",
-  "version": "1.0.0",
-  "description": "",
+  "version": "0.2.0",
+  "description": "Lightweight process-level traffic control tool for proxy workflows on Windows.",
   "main": "index.js",
   "scripts": {
+    "icon:build": "powershell -ExecutionPolicy Bypass -File .\\scripts\\generate-icon.ps1",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "commonjs",
   "dependencies": {
     "png-to-ico": "^3.0.1"

@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "smartflow-core",
+  "smartflow-cli",
   "smartflow-ui/src-tauri"
 ]
 resolver = "2"

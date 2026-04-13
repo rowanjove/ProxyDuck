@@ -1,16 +1,28 @@
-use std::{net::SocketAddr, process::{Command, Stdio}};
+use std::{
+    net::SocketAddr,
+    process::{Command, Stdio},
+};
 
 use anyhow::Result;
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderValue, StatusCode},
     response::IntoResponse,
     routing::{get, post, put},
     Json, Router,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tower_http::{
+    cors::{AllowOrigin, CorsLayer},
+    trace::TraceLayer,
+};
+
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 use crate::{
     model::{
@@ -49,9 +61,48 @@ fn router(state: CoreState) -> Router {
         .route("/proxies/:id", put(update_proxy).delete(delete_proxy))
         .route("/engine/mode", post(change_engine_mode))
         .route("/runtime", post(update_runtime))
-        .layer(CorsLayer::permissive())
+        .layer(
+            CorsLayer::new()
+                .allow_origin(AllowOrigin::predicate(|origin, _| {
+                    is_allowed_local_origin(origin)
+                }))
+                .allow_methods(tower_http::cors::Any)
+                .allow_headers(tower_http::cors::Any),
+        )
         .layer(TraceLayer::new_for_http())
         .with_state(state)
+}
+
+fn is_allowed_local_origin(origin: &HeaderValue) -> bool {
+    let Ok(origin) = origin.to_str() else {
+        return false;
+    };
+
+    let normalized = origin.trim().trim_end_matches('/').to_ascii_lowercase();
+    if normalized == "tauri://localhost" {
+        return true;
+    }
+
+    let Some((scheme, remainder)) = normalized.split_once("://") else {
+        return false;
+    };
+
+    if !matches!(scheme, "http" | "https") {
+        return false;
+    }
+
+    let authority = remainder.split('/').next().unwrap_or(remainder);
+    let host = if authority.starts_with('[') {
+        authority
+            .split(']')
+            .next()
+            .unwrap_or(authority)
+            .trim_start_matches('[')
+    } else {
+        authority.split(':').next().unwrap_or(authority)
+    };
+
+    matches!(host, "localhost" | "127.0.0.1" | "::1" | "tauri.localhost")
 }
 
 #[derive(Debug, Serialize)]
@@ -177,6 +228,7 @@ try {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
             .output()
             .map_err(|error| format!("failed to resolve icon: {error}"))?;
 
@@ -354,7 +406,12 @@ async fn create_quickbar(
     State(state): State<CoreState>,
     Json(payload): Json<QuickBarUpsert>,
 ) -> impl IntoResponse {
-    let mut item = QuickBarItem::new(payload.name, payload.exe_path, payload.proxy_profile);
+    let path_trim = payload.exe_path.trim().to_string();
+    if path_trim.is_empty() {
+        return err(StatusCode::BAD_REQUEST, "exe_path cannot be empty").into_response();
+    }
+
+    let mut item = QuickBarItem::new(payload.name, path_trim, payload.proxy_profile);
     if let Some(args) = payload.args {
         item.args = args;
     }
@@ -392,13 +449,18 @@ async fn update_quickbar(
     Path(id): Path<String>,
     Json(payload): Json<QuickBarUpsert>,
 ) -> impl IntoResponse {
+    let path_trim = payload.exe_path.trim().to_string();
+    if path_trim.is_empty() {
+        return err(StatusCode::BAD_REQUEST, "exe_path cannot be empty").into_response();
+    }
+
     let result = state.mutate_config(|cfg| {
         cfg.quick_bar
             .iter_mut()
             .find(|item| item.id == id)
             .map(|item| {
                 item.name = payload.name;
-                item.exe_path = payload.exe_path;
+                item.exe_path = path_trim.clone();
                 item.proxy_profile = payload.proxy_profile;
                 if let Some(args) = payload.args {
                     item.args = args;
@@ -663,5 +725,63 @@ async fn update_runtime(
             ok(runtime).into_response()
         }
         Err(error) => err(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::AppConfig;
+
+    #[tokio::test]
+    async fn test_health_handler() {
+        let cfg = AppConfig::default();
+        let state = CoreState::new(std::env::temp_dir().join("test_health_handler.json5"), cfg);
+
+        let response = health(State(state)).await;
+        assert!(response.0.ok);
+        assert_eq!(response.0.data.status, "ok");
+    }
+
+    #[test]
+    fn test_ok_err_wrappers() {
+        let success = ok("test");
+        assert!(success.0.ok);
+        assert_eq!(success.0.data, "test");
+
+        let (status, failure) = err(StatusCode::BAD_REQUEST, "invalid_input");
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(!failure.0.ok);
+        assert_eq!(failure.0.error, "invalid_input");
+    }
+
+    #[test]
+    fn test_allowed_local_origins() {
+        let allowed = [
+            "http://localhost:3000",
+            "https://127.0.0.1:8443",
+            "http://tauri.localhost:1420",
+            "tauri://localhost",
+        ];
+
+        for origin in allowed {
+            assert!(
+                is_allowed_local_origin(&origin.parse().unwrap()),
+                "{origin}"
+            );
+        }
+
+        let blocked = [
+            "https://example.com",
+            "http://evil.localhost.example",
+            "file://local",
+        ];
+
+        for origin in blocked {
+            assert!(
+                !is_allowed_local_origin(&origin.parse().unwrap()),
+                "{origin}"
+            );
+        }
     }
 }

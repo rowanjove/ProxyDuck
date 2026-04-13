@@ -41,6 +41,83 @@ pub fn load_or_init(path: &PathBuf) -> Result<AppConfig> {
 
 pub fn save(path: &PathBuf, config: &AppConfig) -> Result<()> {
     let body = serde_json::to_string_pretty(config).context("failed to serialize config")?;
-    fs::write(path, body).with_context(|| format!("failed to write config: {}", path.display()))?;
+
+    let mut tmp_path = path.clone();
+    tmp_path.set_extension("json5.tmp");
+
+    fs::write(&tmp_path, body)
+        .with_context(|| format!("failed to write config temp file: {}", tmp_path.display()))?;
+    replace_file(&tmp_path, path)?;
+
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn replace_file(source: &PathBuf, destination: &PathBuf) -> Result<()> {
+    use std::{iter, os::windows::ffi::OsStrExt};
+
+    use windows::{
+        core::PCWSTR,
+        Win32::Storage::FileSystem::{
+            MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+        },
+    };
+
+    let source_wide = source
+        .as_os_str()
+        .encode_wide()
+        .chain(iter::once(0))
+        .collect::<Vec<_>>();
+    let destination_wide = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(iter::once(0))
+        .collect::<Vec<_>>();
+
+    unsafe {
+        MoveFileExW(
+            PCWSTR(source_wide.as_ptr()),
+            PCWSTR(destination_wide.as_ptr()),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    }
+    .with_context(|| format!("failed to replace config file: {}", destination.display()))?;
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn replace_file(source: &PathBuf, destination: &PathBuf) -> Result<()> {
+    fs::rename(source, destination)
+        .with_context(|| format!("failed to rename temp file to: {}", destination.display()))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_save_and_load_config() {
+        let path = std::env::temp_dir()
+            .join(uuid::Uuid::new_v4().to_string())
+            .join("config.json5");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+
+        let config = AppConfig::default();
+        save(&path, &config).unwrap();
+
+        let mut updated = config.clone();
+        updated.runtime.enabled = true;
+        save(&path, &updated).unwrap();
+
+        // Assert atomic temp file is missing, meaning it was renamed
+        let tmp_path = path.with_extension("json5.tmp");
+        assert!(!tmp_path.exists());
+
+        // Load it back
+        let loaded = load_or_init(&path).unwrap();
+        assert_eq!(loaded.version, updated.version);
+        assert!(loaded.runtime.enabled);
+    }
 }

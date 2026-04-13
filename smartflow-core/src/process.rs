@@ -126,3 +126,55 @@ pub fn rule_matches_process(rule: &Rule, process: &ProcessInfo) -> bool {
 
     false
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::MatchCriteria;
+
+    #[test]
+    fn test_rule_matches_process() {
+        let mut matcher = MatchCriteria::default();
+        matcher.app_names = vec!["node.exe".to_string()];
+
+        let mut rule = Rule::new("test".to_string(), matcher, "p".to_string());
+
+        let p1 = ProcessInfo {
+            pid: 100,
+            name: "node.exe".to_string(),
+            exe: "C:\\Program Files\\nodejs\\node.exe".to_string(),
+        };
+        assert!(rule_matches_process(&rule, &p1));
+
+        let p2 = ProcessInfo {
+            pid: 101,
+            name: "NoDe.ExE".to_string(),
+            exe: "C:\\node.exe".to_string(),
+        };
+        assert!(rule_matches_process(&rule, &p2));
+
+        let p3 = ProcessInfo {
+            pid: 102,
+            name: "python.exe".to_string(),
+            exe: "C:\\python.exe".to_string(),
+        };
+        assert!(!rule_matches_process(&rule, &p3));
+
+        rule.enabled = false;
+        assert!(!rule_matches_process(&rule, &p1));
+
+        rule.enabled = true;
+        rule.matcher.app_names.clear();
+        rule.matcher.exe_paths = vec!["python.exe".to_string()];
+        assert!(rule_matches_process(&rule, &p3));
+
+        rule.matcher.exe_paths.clear();
+        rule.matcher.wildcard = Some("python".to_string());
+        assert!(rule_matches_process(&rule, &p3));
+
+        rule.matcher.wildcard = None;
+        rule.matcher.pids = vec![100];
+        assert!(rule_matches_process(&rule, &p1));
+        assert!(!rule_matches_process(&rule, &p2));
+    }
+}

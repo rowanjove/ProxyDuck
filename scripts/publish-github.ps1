@@ -7,14 +7,19 @@ param(
 
   [string]$Tag = "",
 
-  [string]$AssetPath = "release/SmartFlow-2026-02-28-build3.zip"
+  [string]$AssetPath = "",
+
+  [string]$NotesPath = "CHANGELOG.md",
+
+  [switch]$SkipAsset
 )
 
 $ErrorActionPreference = "Stop"
 
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
-$asset = Join-Path $root $AssetPath
 $rootPath = $root.Path
+$asset = $null
+$notesFile = $null
 
 function Invoke-External {
   param(
@@ -41,8 +46,97 @@ function Invoke-External {
   }
 }
 
-if (!(Test-Path $asset)) {
-  throw "Release asset not found: $asset"
+function Resolve-ReleaseAsset {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RootPath,
+
+    [Parameter(Mandatory = $true)]
+    [string]$ReleaseTag,
+
+    [string]$RequestedAssetPath = "",
+
+    [switch]$SkipBinaryAsset
+  )
+
+  if ($SkipBinaryAsset) {
+    return $null
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($RequestedAssetPath)) {
+    $candidate = if ([System.IO.Path]::IsPathRooted($RequestedAssetPath)) {
+      $RequestedAssetPath
+    } else {
+      Join-Path $RootPath $RequestedAssetPath
+    }
+
+    if (!(Test-Path -LiteralPath $candidate)) {
+      throw "Release asset not found: $candidate"
+    }
+
+    return (Resolve-Path -LiteralPath $candidate).Path
+  }
+
+  $packageDir = Join-Path $RootPath "release\SmartFlow"
+  if (!(Test-Path -LiteralPath $packageDir)) {
+    throw "No release asset was provided and default package directory was not found: $packageDir. Run .\scripts\build-release.ps1 first, pass -AssetPath, or use -SkipAsset."
+  }
+
+  $archivePath = Join-Path (Join-Path $RootPath "release") "SmartFlow-$ReleaseTag.zip"
+  if (Test-Path -LiteralPath $archivePath) {
+    Remove-Item -LiteralPath $archivePath -Force
+  }
+
+  Write-Host "[SmartFlow] Packaging release asset: $archivePath"
+  Compress-Archive -Path $packageDir -DestinationPath $archivePath -CompressionLevel Optimal -Force
+
+  return $archivePath
+}
+
+function Resolve-ReleaseNotesFile {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RootPath,
+
+    [string]$RequestedNotesPath = ""
+  )
+
+  if ([string]::IsNullOrWhiteSpace($RequestedNotesPath)) {
+    return $null
+  }
+
+  $candidate = if ([System.IO.Path]::IsPathRooted($RequestedNotesPath)) {
+    $RequestedNotesPath
+  } else {
+    Join-Path $RootPath $RequestedNotesPath
+  }
+
+  if (!(Test-Path -LiteralPath $candidate)) {
+    Write-Host "[SmartFlow] Release notes file not found, falling back to generated notes: $candidate"
+    return $null
+  }
+
+  return (Resolve-Path -LiteralPath $candidate).Path
+}
+
+function Resolve-ProjectVersion {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RootPath
+  )
+
+  $tauriConfig = Join-Path $RootPath "smartflow-ui\src-tauri\tauri.conf.json"
+  if (!(Test-Path -LiteralPath $tauriConfig)) {
+    throw "Project version source not found: $tauriConfig"
+  }
+
+  $config = Get-Content -LiteralPath $tauriConfig -Raw | ConvertFrom-Json
+  $version = $config.package.version
+  if ([string]::IsNullOrWhiteSpace($version)) {
+    throw "Project version is missing from $tauriConfig"
+  }
+
+  return $version.Trim()
 }
 
 Invoke-External gh @("auth", "status", "-h", "github.com")
@@ -73,8 +167,11 @@ if ([string]::IsNullOrWhiteSpace($originUrl)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($Tag)) {
-  $Tag = "v0.1.0-$(Get-Date -Format 'yyyyMMdd-HHmm')"
+  $Tag = "v$(Resolve-ProjectVersion -RootPath $rootPath)"
 }
+
+$asset = Resolve-ReleaseAsset -RootPath $rootPath -ReleaseTag $Tag -RequestedAssetPath $AssetPath -SkipBinaryAsset:$SkipAsset
+$notesFile = Resolve-ReleaseNotesFile -RootPath $rootPath -RequestedNotesPath $NotesPath
 
 $tagExists = Invoke-External git @("-C", $rootPath, "tag", "-l", $Tag) -CaptureOutput
 if ([string]::IsNullOrWhiteSpace($tagExists)) {
@@ -83,16 +180,37 @@ if ([string]::IsNullOrWhiteSpace($tagExists)) {
 
 Invoke-External git @("-C", $rootPath, "push", "origin", $Tag)
 
-Write-Host "[SmartFlow] Creating GitHub release $Tag with asset: $asset"
-Invoke-External gh @(
-  "release",
-  "create",
-  $Tag,
-  $asset,
-  "--title",
-  "SmartFlow $Tag",
-  "--notes",
-  "Automated release package."
-)
+if ($asset) {
+  Write-Host "[SmartFlow] Creating GitHub release $Tag with asset: $asset"
+  $arguments = @(
+    "release",
+    "create",
+    $Tag,
+    $asset,
+    "--title",
+    "SmartFlow $Tag"
+  )
+  if ($notesFile) {
+    $arguments += @("--notes-file", $notesFile)
+  } else {
+    $arguments += @("--notes", "Automated release.")
+  }
+  Invoke-External -FilePath gh -Arguments $arguments
+} else {
+  Write-Host "[SmartFlow] Creating GitHub release $Tag without a binary asset"
+  $arguments = @(
+    "release",
+    "create",
+    $Tag,
+    "--title",
+    "SmartFlow $Tag"
+  )
+  if ($notesFile) {
+    $arguments += @("--notes-file", $notesFile)
+  } else {
+    $arguments += @("--notes", "Automated release.")
+  }
+  Invoke-External -FilePath gh -Arguments $arguments
+}
 
 Write-Host "[SmartFlow] Done."

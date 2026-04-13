@@ -1,10 +1,16 @@
-﻿let CORE_URL = "http://127.0.0.1:46666";
+let CORE_URL = "http://127.0.0.1:46666";
 let CONFIG_CACHE = null;
 let PROCESS_LIST_LOADED = false;
 let PROCESS_PANEL_OPEN = false;
 const THEME_STORAGE_KEY = "smartflow-theme";
 const QUICK_ICON_CACHE = new Map();
 const QUICK_ICON_IN_FLIGHT = new Map();
+
+const escapeHtml = (str) => {
+  return String(str || "").replace(/[&<>"']/g, (m) => {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m];
+  });
+};
 
 const $ = (id) => document.getElementById(id);
 
@@ -101,7 +107,7 @@ function fillProxySelects(proxies) {
   const options = proxies
     .map(
       (proxy) =>
-        `<option value="${proxy.id}">${proxy.name} (${proxy.endpoint})</option>`
+        `<option value="${escapeHtml(proxy.id)}">${escapeHtml(proxy.name)} (${escapeHtml(proxy.endpoint)})</option>`
     )
     .join("");
 
@@ -124,12 +130,12 @@ function renderProxies(proxies) {
   for (const proxy of proxies) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${proxy.name}</td>
-      <td>${proxy.kind}</td>
-      <td>${proxy.endpoint}</td>
+      <td>${escapeHtml(proxy.name)}</td>
+      <td>${escapeHtml(proxy.kind)}</td>
+      <td>${escapeHtml(proxy.endpoint)}</td>
       <td>${proxy.enabled ? "启用" : "禁用"}</td>
       <td>
-        <button data-action="delete-proxy" data-id="${proxy.id}" class="danger">删除</button>
+        <button data-action="delete-proxy" data-id="${escapeHtml(proxy.id)}" class="danger">删除</button>
       </td>
     `;
     tbody.appendChild(tr);
@@ -150,14 +156,14 @@ function renderRules(rules) {
 
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${rule.name}</td>
-      <td>${matcher}</td>
-      <td>${rule.proxyProfile}</td>
-      <td>${(rule.protocols || []).join("/")}</td>
+      <td>${escapeHtml(rule.name)}</td>
+      <td>${escapeHtml(matcher)}</td>
+      <td>${escapeHtml(rule.proxyProfile)}</td>
+      <td>${escapeHtml((rule.protocols || []).join("/"))}</td>
       <td>${rule.enabled ? "启用" : "禁用"}</td>
       <td>
-        <button data-action="toggle-rule" data-id="${rule.id}">${rule.enabled ? "禁用" : "启用"}</button>
-        <button data-action="delete-rule" data-id="${rule.id}" class="danger">删除</button>
+        <button data-action="toggle-rule" data-id="${escapeHtml(rule.id)}">${rule.enabled ? "禁用" : "启用"}</button>
+        <button data-action="delete-rule" data-id="${escapeHtml(rule.id)}" class="danger">删除</button>
       </td>
     `;
     tbody.appendChild(tr);
@@ -172,13 +178,13 @@ function renderQuickBar(items) {
   for (const item of items) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${item.name}</td>
-      <td>${item.exePath}</td>
-      <td>${item.proxyProfile}</td>
-      <td>${item.startMode}</td>
+      <td>${escapeHtml(item.name)}</td>
+      <td>${escapeHtml(item.exePath)}</td>
+      <td>${escapeHtml(item.proxyProfile)}</td>
+      <td>${escapeHtml(item.startMode)}</td>
       <td>
-        <button data-action="launch-quickbar" data-id="${item.id}">启动</button>
-        <button data-action="delete-quickbar" data-id="${item.id}" class="danger">删除</button>
+        <button data-action="launch-quickbar" data-id="${escapeHtml(item.id)}">启动</button>
+        <button data-action="delete-quickbar" data-id="${escapeHtml(item.id)}" class="danger">删除</button>
       </td>
     `;
     tbody.appendChild(tr);
@@ -204,19 +210,9 @@ async function loadExeIconDataUrl(exePath) {
 
   if (!QUICK_ICON_IN_FLIGHT.has(key)) {
     const task = (async () => {
-      let iconDataUrl = null;
-
-      if (window.__TAURI__) {
-        iconDataUrl = await invokeTauri("get_exe_icon_data_url", {
-          exePath
-        }).catch(() => null);
-      }
-
-      if (!iconDataUrl) {
-        iconDataUrl = await request(
-          `/icon/exe?exePath=${encodeURIComponent(exePath)}`
-        ).catch(() => null);
-      }
+      const iconDataUrl = await request(
+        `/icon/exe?exePath=${encodeURIComponent(exePath)}`
+      ).catch(() => null);
 
       if (iconDataUrl) {
         QUICK_ICON_CACHE.set(key, iconDataUrl);
@@ -329,10 +325,10 @@ function renderProcesses(processes) {
   for (const process of visibleProcesses) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${process.pid}</td>
-      <td>${process.name}</td>
-      <td title="${process.exe}">${process.exe}</td>
-      <td><button data-action="rule-from-process" data-name="${encodeURIComponent(process.name)}">加入规则</button></td>
+      <td>${escapeHtml(process.pid)}</td>
+      <td>${escapeHtml(process.name)}</td>
+      <td title="${escapeHtml(process.exe)}">${escapeHtml(process.exe)}</td>
+      <td><button data-action="rule-from-process" data-name="${escapeHtml(encodeURIComponent(process.name))}">加入规则</button></td>
     `;
     tbody.appendChild(tr);
   }

@@ -1,6 +1,12 @@
 ﻿# SmartFlow
 
-SmartFlow is a Windows per-process proxy controller with a tray UI (`smartflow-ui`) and local core service (`smartflow-core`).
+SmartFlow is a lightweight per-process traffic control tool for Windows. It works with proxy tools like Clash, sing-box, and V2Ray, so traffic policy can follow specific applications instead of relying only on domain/IP matching.
+
+It is designed for modern applications that may bypass system proxy settings via custom network stacks, built-in DNS, HTTP/2, or QUIC. Typical scenarios include AI IDEs, language servers, developer toolchains, and automation scripts.
+
+SmartFlow provides a tray UI (`smartflow-ui`) and local core service (`smartflow-core`) to help you bind proxy behavior to target processes such as `cursor.exe`, `node.exe`, and language server processes.
+
+SmartFlow is open source under the MIT License.
 
 ## Current Data Plane
 
@@ -23,7 +29,7 @@ SmartFlow is a Windows per-process proxy controller with a tray UI (`smartflow-u
 ## Build Prerequisites (Win10)
 
 - Rust toolchain (MSVC)
-- Visual Studio Build Tools 2022 + C++ toolset
+- Visual Studio Build Tools 2022 + C++ toolset + Windows 10/11 SDK
 - Node.js + npm (frontend asset helper)
 
 ## Build
@@ -32,16 +38,28 @@ SmartFlow is a Windows per-process proxy controller with a tray UI (`smartflow-u
 .\scripts\build-release.ps1
 ```
 
+If you need to bundle a local ProxiFyre runtime after reviewing its upstream
+license terms:
+
+```powershell
+.\scripts\build-release.ps1 -BundleProxifyre
+```
+
 Output:
 
 - `release\SmartFlow\smartflow-core.exe`
+- `release\SmartFlow\smartflow-cli.exe`
 - `release\SmartFlow\smartflow-ui.exe`
-- `release\SmartFlow\proxifyre\*` (bundled runtime)
+- `release\SmartFlow\CHANGELOG.md`
+- `release\SmartFlow\LICENSE`
+- `release\SmartFlow\THIRD_PARTY_NOTICES.md`
+- `release\SmartFlow\proxifyre\*` (optional, only when `-BundleProxifyre` is used)
 
 ## Run
 
 ```powershell
 .\release\SmartFlow\smartflow-core.exe --bind 127.0.0.1:46666
+.\release\SmartFlow\smartflow-cli.exe status
 .\release\SmartFlow\smartflow-ui.exe
 ```
 
@@ -50,6 +68,8 @@ Notes:
 - Run as **Administrator** for full enforcement/firewall rule operations.
 - Runtime hardening firewall rules are applied only when at least one SOCKS5 endpoint is reachable.
 - New default config starts with `runtime.enabled = false` for safer first launch.
+- The source repo and default release output do **not** bundle ProxiFyre binaries.
+- If local builds fail with missing `kernel32.lib` / `stddef.h`, install the Windows SDK component for Visual Studio Build Tools.
 - `smartflow-core` searches ProxiFyre in this order:
   1. `SMARTFLOW_PROXIFYRE_DIR`
   2. `<core_dir>\proxifyre`
@@ -76,11 +96,46 @@ Base URL: `http://127.0.0.1:46666`
 - `GET /stats`
 - `GET /logs`
 
+## CLI
+
+`smartflow-cli` talks to the local core HTTP API and is useful for scripts,
+PowerShell workflows, and headless machines.
+
+Examples:
+
+```powershell
+.\release\SmartFlow\smartflow-cli.exe status
+.\release\SmartFlow\smartflow-cli.exe runtime on
+.\release\SmartFlow\smartflow-cli.exe mode set win-divert
+.\release\SmartFlow\smartflow-cli.exe proxies list
+.\release\SmartFlow\smartflow-cli.exe proxies add --id clash-local --name "Clash Local" --kind socks5 --endpoint 127.0.0.1:7897
+.\release\SmartFlow\smartflow-cli.exe proxies update clash-local --endpoint 127.0.0.1:7898 --enabled on
+.\release\SmartFlow\smartflow-cli.exe rules list
+.\release\SmartFlow\smartflow-cli.exe rules add --name "Node via Clash" --proxy clash-socks --app node.exe
+.\release\SmartFlow\smartflow-cli.exe rules remove "Node via Clash"
+.\release\SmartFlow\smartflow-cli.exe quickbar launch cursor
+.\release\SmartFlow\smartflow-cli.exe processes list --filter node --limit 20
+.\release\SmartFlow\smartflow-cli.exe logs --tail 50
+```
+
+Set `SMARTFLOW_CORE_URL` if your core is not using the default
+`http://127.0.0.1:46666`.
+
+## License
+
+- SmartFlow source code is licensed under [MIT](./LICENSE).
+- Third-party runtimes keep their own licenses. See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).
+- Release history is tracked in [CHANGELOG.md](./CHANGELOG.md).
+
 ---
 
 ## 中文版
 
-SmartFlow 是一个 Windows 按进程代理控制器，包含托盘界面（`smartflow-ui`）和本地核心服务（`smartflow-core`）。
+SmartFlow 是一款面向 Windows 的轻量化进程级流量管理工具，包含托盘界面（`smartflow-ui`）和本地核心服务（`smartflow-core`）。它可与 Clash、sing-box、V2Ray 等代理工具协同，让策略按进程生效，而不是仅依赖域名/IP 规则匹配。
+
+该项目主要面向 AI IDE、语言服务器、开发工具链等场景，解决应用使用自定义网络栈、内置 DNS、HTTP/2、QUIC 时可能绕过系统代理的问题。SmartFlow 的定位是应用程序与代理工具之间的流量控制层。
+
+SmartFlow 以 MIT License 开源。
 
 ### 当前数据平面
 
@@ -103,7 +158,7 @@ SmartFlow 是一个 Windows 按进程代理控制器，包含托盘界面（`sma
 ### 构建依赖（Win10）
 
 - Rust 工具链（MSVC）
-- Visual Studio Build Tools 2022 + C++ toolset
+- Visual Studio Build Tools 2022 + C++ toolset + Windows 10/11 SDK
 - Node.js + npm（前端资源辅助）
 
 ### 构建
@@ -112,16 +167,27 @@ SmartFlow 是一个 Windows 按进程代理控制器，包含托盘界面（`sma
 .\scripts\build-release.ps1
 ```
 
+如果你已经审查过 ProxiFyre 的上游许可证，并且确实需要把本地运行时一起打包：
+
+```powershell
+.\scripts\build-release.ps1 -BundleProxifyre
+```
+
 输出目录：
 
 - `release\SmartFlow\smartflow-core.exe`
+- `release\SmartFlow\smartflow-cli.exe`
 - `release\SmartFlow\smartflow-ui.exe`
-- `release\SmartFlow\proxifyre\*`（已打包运行时）
+- `release\SmartFlow\CHANGELOG.md`
+- `release\SmartFlow\LICENSE`
+- `release\SmartFlow\THIRD_PARTY_NOTICES.md`
+- `release\SmartFlow\proxifyre\*`（可选，仅在传入 `-BundleProxifyre` 时生成）
 
 ### 运行
 
 ```powershell
 .\release\SmartFlow\smartflow-core.exe --bind 127.0.0.1:46666
+.\release\SmartFlow\smartflow-cli.exe status
 .\release\SmartFlow\smartflow-ui.exe
 ```
 
@@ -130,6 +196,8 @@ SmartFlow 是一个 Windows 按进程代理控制器，包含托盘界面（`sma
 - 建议使用 **管理员权限** 运行，以获得完整接管/防火墙规则能力。
 - 仅当至少一个 SOCKS5 端点可达时，运行时加固防火墙规则才会应用。
 - 新默认配置中 `runtime.enabled = false`，用于首次启动安全兜底。
+- 源码仓库和默认 release 输出都**不会**直接捆绑 ProxiFyre 二进制。
+- 如果本地构建报 `kernel32.lib` 或 `stddef.h` 缺失，请在 Visual Studio Build Tools 中安装 Windows SDK 组件。
 - `smartflow-core` 会按以下顺序查找 ProxiFyre：
   1. `SMARTFLOW_PROXIFYRE_DIR`
   2. `<core_dir>\proxifyre`
@@ -155,3 +223,32 @@ SmartFlow 是一个 Windows 按进程代理控制器，包含托盘界面（`sma
 - `POST /runtime`
 - `GET /stats`
 - `GET /logs`
+
+### CLI
+
+`smartflow-cli` 直接连接本地 core HTTP API，适合脚本、PowerShell 自动化和无界面环境。
+
+示例：
+
+```powershell
+.\release\SmartFlow\smartflow-cli.exe status
+.\release\SmartFlow\smartflow-cli.exe runtime on
+.\release\SmartFlow\smartflow-cli.exe mode set win-divert
+.\release\SmartFlow\smartflow-cli.exe proxies list
+.\release\SmartFlow\smartflow-cli.exe proxies add --id clash-local --name "Clash Local" --kind socks5 --endpoint 127.0.0.1:7897
+.\release\SmartFlow\smartflow-cli.exe proxies update clash-local --endpoint 127.0.0.1:7898 --enabled on
+.\release\SmartFlow\smartflow-cli.exe rules list
+.\release\SmartFlow\smartflow-cli.exe rules add --name "Node 走 Clash" --proxy clash-socks --app node.exe
+.\release\SmartFlow\smartflow-cli.exe rules remove "Node 走 Clash"
+.\release\SmartFlow\smartflow-cli.exe quickbar launch cursor
+.\release\SmartFlow\smartflow-cli.exe processes list --filter node --limit 20
+.\release\SmartFlow\smartflow-cli.exe logs --tail 50
+```
+
+如果 core 不在默认地址 `http://127.0.0.1:46666`，可通过 `SMARTFLOW_CORE_URL` 指定。
+
+### 许可证
+
+- SmartFlow 源码采用 [MIT](./LICENSE)。
+- 第三方运行时保留各自许可证，详见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。
+- 更新记录见 [CHANGELOG.md](./CHANGELOG.md)。

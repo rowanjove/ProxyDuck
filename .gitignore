@@ -1,6 +1,9 @@
 node_modules/
 target/
 release/
+third_party/proxifyre/pkg/
+third_party/proxifyre/proxifyre.zip
+third_party/proxifyre/**/logs/
 *.log
 *.tmp
 Thumbs.db
