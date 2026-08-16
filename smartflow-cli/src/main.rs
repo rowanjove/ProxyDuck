@@ -1,5 +1,3 @@
-mod auth;
-
 use std::{collections::BTreeMap, time::Duration};
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -9,13 +7,9 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 
 #[derive(Debug, Parser)]
-#[command(author, version, about = "SmartFlow command line client")]
+#[command(author, version, about = "ProxyDuck command line client")]
 struct Cli {
-    #[arg(
-        long,
-        env = "SMARTFLOW_CORE_URL",
-        default_value = "http://127.0.0.1:46666"
-    )]
+    #[arg(long, default_value_t = proxyduck_common::core_url_from_env())]
     core_url: String,
 
     #[arg(long, global = true, conflicts_with = "format")]
@@ -221,6 +215,7 @@ impl SwitchState {
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum EngineModeArg {
     WinDivert,
+    SingBox,
     Wfp,
     ApiHook,
 }
@@ -267,6 +262,7 @@ impl EngineModeArg {
     fn api_value(self) -> &'static str {
         match self {
             Self::WinDivert => "win_divert",
+            Self::SingBox => "sing_box",
             Self::Wfp => "wfp",
             Self::ApiHook => "api_hook",
         }
@@ -277,9 +273,7 @@ impl EngineModeArg {
 #[serde(rename_all = "camelCase")]
 struct ApiEnvelope<T> {
     ok: bool,
-    #[serde(default)]
     data: Option<T>,
-    #[serde(default)]
     error: Option<String>,
 }
 
@@ -299,6 +293,12 @@ struct RuntimeToggles {
     ipv6_blocked: bool,
     doh_blocked: bool,
     log_level: String,
+    #[serde(default = "default_leak_protection_mode")]
+    leak_protection_mode: String,
+}
+
+fn default_leak_protection_mode() -> String {
+    "availability".to_string()
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -376,6 +376,36 @@ struct RuntimeStats {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct DataPlaneStatus {
+    phase: String,
+    backend_name: String,
+    child_pid: Option<u32>,
+    active_rules: usize,
+    firewall_rules: usize,
+    proxy_endpoint_reachable: Option<bool>,
+    fail_closed_active: bool,
+    message: Option<String>,
+    checked_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeStatus {
+    desired_enabled: bool,
+    engine_mode: String,
+    data_plane: DataPlaneStatus,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LiveSnapshot {
+    health: HealthStatus,
+    runtime_status: RuntimeStatus,
+    stats: RuntimeStats,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct UiLogEvent {
     ts: String,
     level: String,
@@ -397,6 +427,7 @@ struct StatusReport {
     core_url: String,
     health: HealthStatus,
     runtime: RuntimeToggles,
+    runtime_status: RuntimeStatus,
     proxy_count: usize,
     enabled_proxy_count: usize,
     rule_count: usize,
@@ -420,7 +451,7 @@ impl ApiClient {
 
         Ok(Self {
             base_url: base_url.trim_end_matches('/').to_string(),
-            token: auth::load_or_create_token()?,
+            token: proxyduck_common::load_or_create_token()?,
             http,
         })
     }
@@ -429,7 +460,7 @@ impl ApiClient {
         let response = self
             .http
             .get(self.url(path))
-            .header("X-SmartFlow-Token", &self.token)
+            .header(proxyduck_common::AUTH_HEADER, &self.token)
             .send()
             .with_context(|| format!("request failed: GET {path}"))?;
         self.decode(response, path)
@@ -439,7 +470,7 @@ impl ApiClient {
         let response = self
             .http
             .post(self.url(path))
-            .header("X-SmartFlow-Token", &self.token)
+            .header(proxyduck_common::AUTH_HEADER, &self.token)
             .json(&body)
             .send()
             .with_context(|| format!("request failed: POST {path}"))?;
@@ -450,7 +481,7 @@ impl ApiClient {
         let response = self
             .http
             .put(self.url(path))
-            .header("X-SmartFlow-Token", &self.token)
+            .header(proxyduck_common::AUTH_HEADER, &self.token)
             .json(&body)
             .send()
             .with_context(|| format!("request failed: PUT {path}"))?;
@@ -461,7 +492,7 @@ impl ApiClient {
         let response = self
             .http
             .delete(self.url(path))
-            .header("X-SmartFlow-Token", &self.token)
+            .header(proxyduck_common::AUTH_HEADER, &self.token)
             .send()
             .with_context(|| format!("request failed: DELETE {path}"))?;
         self.decode(response, path)
@@ -491,6 +522,9 @@ impl ApiClient {
 }
 
 fn main() -> Result<()> {
+    if let Err(error) = proxyduck_common::install_panic_hook("cli") {
+        eprintln!("failed to initialize crash logging: {error}");
+    }
     let cli = Cli::parse();
     let client = ApiClient::new(cli.core_url.clone())?;
     let json_output = cli.json_output();
@@ -509,32 +543,42 @@ fn main() -> Result<()> {
 }
 
 fn show_status(client: &ApiClient, json_output: bool) -> Result<()> {
-    let health: HealthStatus = client.get("/health")?;
+    let snapshot: LiveSnapshot = client.get("/snapshot")?;
     let config: AppConfig = client.get("/config")?;
-    let stats: RuntimeStats = client.get("/stats")?;
 
     let report = StatusReport {
         core_url: client.base_url.clone(),
-        health,
+        health: snapshot.health,
         runtime: config.runtime,
+        runtime_status: snapshot.runtime_status,
         proxy_count: config.proxies.len(),
         enabled_proxy_count: config.proxies.iter().filter(|proxy| proxy.enabled).count(),
         rule_count: config.rules.len(),
         enabled_rule_count: config.rules.iter().filter(|rule| rule.enabled).count(),
         quickbar_count: config.quick_bar.len(),
-        stats,
+        stats: snapshot.stats,
     };
 
     if json_output {
         return print_json(&report);
     }
 
-    println!("SmartFlow");
+    println!("ProxyDuck");
     println!("  Core URL: {}", report.core_url);
     println!("  Version: {}", report.health.version);
     println!("  Status: {}", report.health.status);
     println!("  Engine Mode: {}", report.stats.engine_mode);
     println!("  Runtime Enabled: {}", yes_no(report.runtime.enabled));
+    println!("  Data Plane: {}", report.runtime_status.data_plane.phase);
+    println!(
+        "  Backend: {}",
+        report.runtime_status.data_plane.backend_name
+    );
+    println!(
+        "  Leak Protection: {} (fail closed: {})",
+        report.runtime.leak_protection_mode,
+        yes_no(report.runtime_status.data_plane.fail_closed_active)
+    );
     println!(
         "  Runtime Policies: DNS={} IPv6={} DoH={}",
         yes_no(report.runtime.dns_enforced),
@@ -566,8 +610,9 @@ fn handle_runtime(client: &ApiClient, command: RuntimeCommand, json_output: bool
     match command {
         RuntimeCommand::Status => {
             let config: AppConfig = client.get("/config")?;
+            let status: RuntimeStatus = client.get("/runtime/status")?;
             if json_output {
-                return print_json(&config.runtime);
+                return print_json(&json!({ "settings": config.runtime, "status": status }));
             }
 
             println!("Runtime");
@@ -576,6 +621,21 @@ fn handle_runtime(client: &ApiClient, command: RuntimeCommand, json_output: bool
             println!("  IPv6 Blocked: {}", yes_no(config.runtime.ipv6_blocked));
             println!("  DoH Blocked: {}", yes_no(config.runtime.doh_blocked));
             println!("  Log Level: {}", config.runtime.log_level);
+            println!("  Leak Protection: {}", config.runtime.leak_protection_mode);
+            println!("  Data Plane: {}", status.data_plane.phase);
+            println!("  Backend: {}", status.data_plane.backend_name);
+            println!("  Active Rules: {}", status.data_plane.active_rules);
+            println!("  Firewall Rules: {}", status.data_plane.firewall_rules);
+            println!(
+                "  Fail Closed: {}",
+                yes_no(status.data_plane.fail_closed_active)
+            );
+            if let Some(reachable) = status.data_plane.proxy_endpoint_reachable {
+                println!("  Proxy Reachable: {}", yes_no(reachable));
+            }
+            if let Some(message) = status.data_plane.message.as_deref() {
+                println!("  Message: {message}");
+            }
             Ok(())
         }
         RuntimeCommand::On => set_runtime_enabled(client, true, json_output),
@@ -652,8 +712,8 @@ fn handle_proxies(client: &ApiClient, command: ProxyCommand, json_output: bool) 
             }
 
             println!(
-                "{:<36}  {:<24}  {:<10}  {:<22}  {}",
-                "ID", "NAME", "KIND", "ENDPOINT", "ENABLED"
+                "{:<36}  {:<24}  {:<10}  {:<22}  ENABLED",
+                "ID", "NAME", "KIND", "ENDPOINT"
             );
             for proxy in proxies {
                 println!(
@@ -764,8 +824,8 @@ fn handle_rules(client: &ApiClient, command: RuleCommand, json_output: bool) -> 
             }
 
             println!(
-                "{:<36}  {:<24}  {:<10}  {:<10}  {:<16}  {}",
-                "ID", "NAME", "SOURCE", "ENABLED", "PROXY", "MATCHER"
+                "{:<36}  {:<24}  {:<10}  {:<10}  {:<16}  MATCHER",
+                "ID", "NAME", "SOURCE", "ENABLED", "PROXY"
             );
             for rule in rules {
                 println!(
@@ -839,8 +899,8 @@ fn handle_quickbar(client: &ApiClient, command: QuickBarCommand, json_output: bo
             }
 
             println!(
-                "{:<36}  {:<24}  {:<18}  {:<16}  {}",
-                "ID", "NAME", "MODE", "PROXY", "EXE"
+                "{:<36}  {:<24}  {:<18}  {:<16}  EXE",
+                "ID", "NAME", "MODE", "PROXY"
             );
             for item in items {
                 println!(
@@ -897,7 +957,7 @@ fn handle_processes(client: &ApiClient, command: ProcessCommand, json_output: bo
                 return Ok(());
             }
 
-            println!("{:<8}  {:<28}  {}", "PID", "NAME", "EXE");
+            println!("{:<8}  {:<28}  EXE", "PID", "NAME");
             for proc_info in processes {
                 println!(
                     "{:<8}  {:<28}  {}",

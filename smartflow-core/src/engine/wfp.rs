@@ -2,7 +2,7 @@
 
 use crate::{
     engine::{proxifyre::ProxifyreBackend, DataPlaneBackend, ProxyEngine},
-    model::{AppConfig, EngineMode},
+    model::{AppConfig, DataPlaneStatus, EngineMode},
 };
 
 pub struct WfpEngine {
@@ -32,5 +32,13 @@ impl ProxyEngine for WfpEngine {
 
     fn reload_rules(&self, config: &AppConfig) -> Result<()> {
         self.backend.reload(config)
+    }
+
+    fn status(&self) -> DataPlaneStatus {
+        self.backend.status()
+    }
+
+    fn maintain(&self, config: &AppConfig) -> Result<bool> {
+        self.backend.maintain(config)
     }
 }

@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "architecture": "x64",
+  "proxifyre": {
+    "version": "2.4.0",
+    "tag": "v2.4.0",
+    "commit": "dd1512840e1e3bc596b06b80eda4e2dcd6a9c9ed",
+    "assetFile": "ProxiFyre-v2.4.0-x64-signed.zip",
+    "assetUrl": "https://github.com/wiresock/proxifyre/releases/download/v2.4.0/ProxiFyre-v2.4.0-x64-signed.zip",
+    "assetSize": 1519694,
+    "sha256": "eab65fd7d8eeb716abedb5614618c641de3f9eb8326b99cee1da787141e30cac",
+    "license": "AGPL-3.0-only",
+    "sourceUrl": "https://github.com/wiresock/proxifyre/tree/dd1512840e1e3bc596b06b80eda4e2dcd6a9c9ed"
+  },
+  "winpkfilter": {
+    "version": "3.6.2.1",
+    "tag": "v3.6.2",
+    "commit": "417b8734e844083a10236387fba705d94a2d6bc9",
+    "assetFile": "Windows.Packet.Filter.3.6.2.1.x64.msi",
+    "assetUrl": "https://github.com/wiresock/ndisapi/releases/download/v3.6.2/Windows.Packet.Filter.3.6.2.1.x64.msi",
+    "assetSize": 819200,
+    "sha256": "9c388c0b7f189f7fa98720bae2caecf7d64f30910838b80b438ecf8956b8502c",
+    "license": "MIT",
+    "sourceUrl": "https://github.com/wiresock/ndisapi/tree/417b8734e844083a10236387fba705d94a2d6bc9"
+  },
+  "licenses": [
+    {
+      "file": "ProxiFyre-AGPL-3.0.txt",
+      "component": "ProxiFyre 2.4.0",
+      "url": "https://raw.githubusercontent.com/wiresock/proxifyre/v2.4.0/LICENSE",
+      "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef"
+    },
+    {
+      "file": "WinpkFilter-MIT.txt",
+      "component": "Windows Packet Filter 3.6.2",
+      "url": "https://raw.githubusercontent.com/wiresock/ndisapi/v3.6.2/LICENSE",
+      "sha256": "b12f4cfcce43cef59100cf8c4eaf67ae5246c9a047e00f6059655f6694030efe"
+    },
+    {
+      "file": "Newtonsoft.Json-MIT.txt",
+      "component": "Newtonsoft.Json 13.0.3 (included by ProxiFyre)",
+      "url": "https://raw.githubusercontent.com/JamesNK/Newtonsoft.Json/13.0.3/LICENSE.md",
+      "sha256": "d7f83bbea3264a8e23d7739e44d9db1a4994b357274df6f00876eb2e623827ad"
+    },
+    {
+      "file": "NLog-BSD-3-Clause.txt",
+      "component": "NLog 5.2.3 (included by ProxiFyre)",
+      "url": "https://raw.githubusercontent.com/NLog/NLog/v5.2.3/LICENSE.txt",
+      "sha256": "2a13126d61663a8caed2edd6980af345e0679bb81cb361f2d203d323cbf4b3e5"
+    },
+    {
+      "file": "Topshelf-Apache-2.0.txt",
+      "component": "Topshelf 4.3.0 (included by ProxiFyre)",
+      "url": "https://raw.githubusercontent.com/Topshelf/Topshelf/v4.3.0/LICENSE",
+      "sha256": "cb5e8e7e5f4a3988e1063c142c60dc2df75605f4c46515e776e3aca6df976e14"
+    }
+  ]
+}

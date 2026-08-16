@@ -20,7 +20,7 @@ impl ProxyProfile {
     pub fn clash_default() -> Self {
         Self {
             id: "clash-socks".to_string(),
-            name: "Clash Verge Default".to_string(),
+            name: "Clash Verge".to_string(),
             kind: ProxyKind::Socks5,
             endpoint: "127.0.0.1:7897".to_string(),
             username: None,
@@ -30,7 +30,7 @@ impl ProxyProfile {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ProxyKind {
     Socks5,
@@ -54,7 +54,7 @@ pub struct MatchCriteria {
     pub wildcard: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Protocol {
     Tcp,
@@ -112,7 +112,7 @@ impl Rule {
             matcher,
             proxy_profile,
             protocols: vec![Protocol::Tcp, Protocol::Udp, Protocol::Dns],
-            auto_bind_children: true,
+            auto_bind_children: false,
             force_dns: true,
             block_ipv6: true,
             block_doh: true,
@@ -156,17 +156,26 @@ impl QuickBarItem {
             proxy_profile,
             start_mode: StartMode::StartAndBind,
             run_as_admin: false,
-            auto_bind_children: true,
+            auto_bind_children: false,
         }
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum EngineMode {
     WinDivert,
+    SingBox,
     Wfp,
     ApiHook,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum LeakProtectionMode {
+    #[default]
+    Availability,
+    Strict,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,6 +186,8 @@ pub struct RuntimeToggles {
     pub ipv6_blocked: bool,
     pub doh_blocked: bool,
     pub log_level: String,
+    #[serde(default)]
+    pub leak_protection_mode: LeakProtectionMode,
 }
 
 impl Default for RuntimeToggles {
@@ -187,6 +198,7 @@ impl Default for RuntimeToggles {
             ipv6_blocked: true,
             doh_blocked: true,
             log_level: "info".to_string(),
+            leak_protection_mode: LeakProtectionMode::Availability,
         }
     }
 }
@@ -195,6 +207,8 @@ impl Default for RuntimeToggles {
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
     pub version: String,
+    #[serde(default)]
+    pub schema_version: u32,
     pub engine_mode: EngineMode,
     pub proxies: Vec<ProxyProfile>,
     pub rules: Vec<Rule>,
@@ -205,7 +219,8 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            version: "0.3.0".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            schema_version: 3,
             engine_mode: EngineMode::WinDivert,
             proxies: vec![ProxyProfile::clash_default()],
             rules: Vec::new(),
@@ -227,6 +242,99 @@ pub struct RuntimeStats {
     pub process_hits: HashMap<String, u64>,
     #[serde(default)]
     pub proxy_hits: HashMap<String, u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EngineCapability {
+    pub mode: EngineMode,
+    pub display_name: String,
+    pub backend_name: String,
+    pub available: bool,
+    pub unavailable_reason: Option<String>,
+    pub supported_proxy_kinds: Vec<ProxyKind>,
+    pub supported_protocols: Vec<Protocol>,
+    pub supports_child_inheritance: bool,
+    pub supports_hash_matching: bool,
+    pub supports_firewall_hardening: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DataPlanePhase {
+    Stopped,
+    Paused,
+    Starting,
+    Running,
+    Degraded,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DataPlaneStatus {
+    pub phase: DataPlanePhase,
+    pub backend_name: String,
+    pub child_pid: Option<u32>,
+    pub active_rules: usize,
+    pub firewall_rules: usize,
+    pub proxy_endpoint_reachable: Option<bool>,
+    pub fail_closed_active: bool,
+    pub message: Option<String>,
+    pub checked_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeStatus {
+    pub desired_enabled: bool,
+    pub engine_mode: EngineMode,
+    pub data_plane: DataPlaneStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyTestResult {
+    pub proxy_id: String,
+    pub reachable: bool,
+    pub protocol_accepted: bool,
+    #[serde(default)]
+    pub tcp_supported: Option<bool>,
+    #[serde(default)]
+    pub tcp_error: Option<String>,
+    #[serde(default)]
+    pub udp_supported: Option<bool>,
+    #[serde(default)]
+    pub udp_error: Option<String>,
+    pub latency_ms: u64,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleEvaluationMatch {
+    pub rule_id: String,
+    pub rule_name: String,
+    pub proxy_id: String,
+    pub match_kind: MatchKind,
+    pub selected: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleEvaluation {
+    pub process: ProcessInfo,
+    pub matches: Vec<RuleEvaluationMatch>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleConflict {
+    pub first_rule_id: String,
+    pub first_rule_name: String,
+    pub second_rule_id: String,
+    pub second_rule_name: String,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -333,7 +441,7 @@ mod tests {
         assert!(rule.enabled);
         assert!(!rule.id.is_empty());
         assert_eq!(rule.protocols.len(), 3);
-        assert!(rule.auto_bind_children);
+        assert!(!rule.auto_bind_children);
         assert!(rule.force_dns);
         assert!(rule.block_ipv6);
         assert!(rule.block_doh);
@@ -354,6 +462,6 @@ mod tests {
         assert!(!qb.id.is_empty());
         assert!(matches!(qb.start_mode, StartMode::StartAndBind));
         assert!(!qb.run_as_admin);
-        assert!(qb.auto_bind_children);
+        assert!(!qb.auto_bind_children);
     }
 }

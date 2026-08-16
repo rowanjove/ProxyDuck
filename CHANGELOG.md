@@ -1,101 +1,33 @@
 # Changelog
 
-All notable changes to SmartFlow are documented in this file.
+ProxyDuck starts a new product version line at **1.0.0**. Earlier ProxyDock and SmartFlow builds are treated as legacy products and are supported only through compatibility migration.
 
-SmartFlow is open source under the MIT License.
-
-以下为 SmartFlow 的版本更新记录。
-
-## 0.3.0 - 2026-04-13
-
-### English
-
-#### Highlights
-
-- Added per-user local API token authentication. The token is stored in the SmartFlow app data directory and is loaded automatically by the desktop UI and CLI.
-- Added observability endpoints for rule hits, proxy hits, and recent match events, and upgraded the Tauri dashboard summary to surface that data more clearly.
-- Added an `AI Dev Template` quick action to seed common IDE, Node.js, and browser proxy rules in one step.
-- Added a `--format json` CLI option while keeping `--json` as a compatibility shortcut.
-
-#### Behavior Changes
-
-- Quick Bar bind modes now synchronize managed EXE rules, so `start_and_bind` and `bind_only` produce a real runtime binding instead of acting like launcher-only flows.
-- Rule matching now follows an explicit priority order: PID > EXE path > app name > wildcard.
-- Internal engine wiring now uses a dedicated data-plane backend trait to reduce coupling and make future backend swaps or test doubles easier.
-
-#### Fixes
-
-- Blocked direct edits and deletes of Quick Bar managed rules from the generic rule endpoints to prevent UI and API drift.
-- Prevented lower-priority rule patterns from shadowing higher-priority bindings in generated ProxiFyre runtime config.
+## 1.0.0 - 2026-08-16
 
 ### 中文
 
-#### 重点更新
-
-- 新增本地 API Token 鉴权。Token 会写入 SmartFlow 应用数据目录，并由桌面 UI 和 CLI 自动读取。
-- 新增规则命中、代理命中、最近命中事件等可观测性接口，同时增强了 Tauri 仪表盘的统计展示。
-- 新增 `AI 开发模板` 快捷入口，可一键导入常见 IDE、Node.js 与浏览器代理规则。
-- CLI 新增 `--format json` 参数，并继续兼容 `--json`。
-
-#### 行为调整
-
-- Quick Bar 的绑定模式现在会同步托管 EXE 规则，`start_and_bind` 和 `bind_only` 会真正产生运行时绑定，而不再只是启动流程。
-- 规则匹配优先级现在明确为：PID > EXE 路径 > 应用名 > 通配。
-- 内部引擎接线新增独立的数据平面 backend trait，降低后续替换后端或做测试替身时的耦合度。
-
-#### 修复
-
-- 禁止通过通用规则接口直接编辑或删除 Quick Bar 托管规则，避免 UI 与 API 状态漂移。
-- 修复低优先级规则模式覆盖高优先级绑定的问题，生成 ProxiFyre 运行时配置时会按优先级收敛。
-
-## 0.2.0 - 2026-04-13
+- 产品正式更名为 ProxyDuck；统一更新桌面标题、数据目录、Cargo 包、二进制、API 请求头、环境变量、Windows 安装器和发布物名称。
+- 使用全新的“鸭子 + 网络路由”图标，并重新生成 Windows PNG、ICO 与前端品牌资源。
+- 新版本号从 1.0.0 开始，同时保留 ProxyDock 与 SmartFlow 的配置、令牌、环境变量和 API 请求头迁移兼容。
+- 提供按进程的 SOCKS5 TCP、UDP 与 DNS 路由、代理鉴权和实际连通性探测。
+- 提供确定性规则优先级、精确路径/进程名匹配、通配模式、规则冲突检测与试运行。
+- 提供 ProxiFyre/WinDivert 与可选 sing-box TUN 数据平面、故障恢复和真实运行状态。
+- 提供防泄漏策略、防火墙事务回滚、配置原子保存、备份恢复和 DPAPI 令牌保护。
+- 提供中文/英文桌面界面、托盘、首次运行检查、配置导入导出和诊断信息。
+- 修复数据平面启动失败会连带退出核心服务的问题；桌面端现在请求必要的管理员权限，并将核心启动日志保存在本机数据目录。
+- 默认发行包内置经固定版本与 SHA-256 校验的 ProxiFyre 2.4.0 x64 和 WinpkFilter 3.6.2.1 x64；安装器自动安装驱动，sing-box 等其他引擎保持用户按需安装。
+- 提供 Core API、CLI、Windows CI、Playwright E2E、便携包、SHA-256 清单和可选安装器签名。
 
 ### English
 
-#### Highlights
-
-- Added `smartflow-cli` for local automation and headless management of the SmartFlow core API.
-- Added CLI commands for status, config, runtime toggles, engine mode, logs, process listing, quick bar launch, proxy management, and rule management.
-- Added a reusable icon generation script and refreshed the app icon set for the Tauri desktop app.
-- Added `LICENSE` and `THIRD_PARTY_NOTICES.md` to release packaging.
-- Added unit tests covering API helpers, config persistence, model defaults, process matching, and local-origin CORS checks.
-
-#### Behavior Changes
-
-- Switched repository and packaged application metadata to MIT licensing.
-- Tightened the core API CORS policy to local origins while keeping browser-based local development usable.
-- Moved executable icon extraction into the core API and kept the Windows implementation hidden-window.
-- Updated release packaging to exclude bundled ProxiFyre by default and support release zip generation.
-- Expanded the README with build, run, CLI, licensing, and packaging guidance in both English and Chinese.
-
-#### Fixes
-
-- Rejected empty quick bar executable paths at the API layer.
-- Avoided regressions where valid local browser origins were blocked by CORS.
-- Restored no-console executable icon extraction behavior on Windows.
-- Fixed the release publishing flow so it would not unintentionally fall back to source-only releases when a packaged asset was expected.
-
-### 中文
-
-#### 重点更新
-
-- 新增 `smartflow-cli`，用于本地自动化脚本和无界面环境下管理 SmartFlow core API。
-- 新增 CLI 命令，覆盖状态查看、配置读取、运行时开关、引擎模式、日志、进程列表、Quick Bar 启动、代理管理和规则管理。
-- 新增可复用的图标生成脚本，并刷新了 Tauri 桌面端图标资源。
-- 在发布内容中补充 `LICENSE` 和 `THIRD_PARTY_NOTICES.md`。
-- 新增一批单元测试，覆盖 API 辅助逻辑、配置持久化、模型默认值、进程匹配和本地 CORS 校验。
-
-#### 行为调整
-
-- 仓库和打包应用的许可证信息统一切换为 MIT。
-- Core API 的 CORS 策略收紧到本地来源，同时保留本地浏览器开发场景可用。
-- 可执行文件图标提取逻辑迁移到 core API，Windows 下继续保持隐藏窗口执行。
-- 发布打包默认不再捆绑 ProxiFyre，并支持生成 release zip。
-- README 扩展为中英双语，补充构建、运行、CLI、许可证和打包说明。
-
-#### 修复
-
-- 在 API 层阻止空的 Quick Bar 可执行路径写入。
-- 修复本地浏览器来源被 CORS 误拦截的回归问题。
-- 恢复 Windows 下无控制台弹窗的图标提取行为。
-- 修复发布流程在预期应附带打包资产时，意外退化为仅源码发布的问题。
+- Renamed the product to ProxyDuck across desktop identity, data directories, Cargo packages, binaries, API headers, environment variables, the Windows installer, and release artifacts.
+- Added a completely redesigned duck-and-network-routing icon and regenerated the Windows PNG, ICO, and frontend brand assets.
+- Started a new product version line at 1.0.0 while retaining migration compatibility with ProxyDock and SmartFlow configuration, tokens, environment variables, and API headers.
+- Included per-process SOCKS5 TCP, UDP, and DNS routing with authentication and real capability probes.
+- Included deterministic rule priority, exact path/process-name matching, glob patterns, conflict detection, and dry runs.
+- Included ProxiFyre/WinDivert and optional sing-box TUN data planes with recovery and truthful runtime state.
+- Included leak-protection policies, transactional firewall rollback, atomic configuration persistence, backup recovery, and DPAPI token protection.
+- Included Chinese and English desktop interfaces, tray integration, first-run checks, configuration portability, and diagnostics.
+- Fixed data-plane startup failures terminating the control service; the desktop app now requests required administrator access and preserves core startup logs in the local data directory.
+- Bundled pinned and SHA-256-verified ProxiFyre 2.4.0 x64 and WinpkFilter 3.6.2.1 x64 by default; the installer installs the driver automatically while sing-box and other engines remain user-managed.
+- Included the Core API, CLI, Windows CI, Playwright E2E, portable packaging, SHA-256 manifests, and optional installer signing.

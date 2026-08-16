@@ -4,26 +4,30 @@
     "beforeBuildCommand": "",
     "beforeDevCommand": "",
     "devPath": "../dist",
-    "distDir": "../dist"
+    "distDir": "../dist",
+    "withGlobalTauri": true
   },
   "package": {
-    "productName": "SmartFlow",
-    "version": "0.3.0"
+    "productName": "ProxyDuck",
+    "version": "1.0.0"
   },
   "tauri": {
     "allowlist": {
-      "all": true
+      "all": false,
+      "dialog": {
+        "open": true
+      }
     },
     "bundle": {
-      "active": false,
-      "identifier": "com.smartflow.app",
+      "active": true,
+      "identifier": "io.proxyduck.desktop",
       "icon": [
         "icons/icon.png",
         "icons/icon.ico"
       ]
     },
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; connect-src http://127.0.0.1:* http://localhost:*; img-src 'self' data:; style-src 'self'; script-src 'self'"
     },
     "systemTray": {
       "iconPath": "icons/icon.png",
@@ -31,9 +35,12 @@
     },
     "windows": [
       {
-        "title": "SmartFlow",
-        "width": 1280,
-        "height": 860,
+        "title": "ProxyDuck",
+        "width": 1240,
+        "height": 800,
+        "minWidth": 960,
+        "minHeight": 640,
+        "center": true,
         "resizable": true,
         "fullscreen": false,
         "visible": true

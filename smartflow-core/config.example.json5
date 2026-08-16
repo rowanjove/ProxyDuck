@@ -1,10 +1,11 @@
 ﻿{
-  version: "0.3.0",
+  version: "1.0.0",
+  schemaVersion: 3,
   engineMode: "win_divert",
   proxies: [
     {
       id: "clash-socks",
-      name: "Clash Verge Default",
+      name: "Clash Verge",
       kind: "socks5",
       endpoint: "127.0.0.1:7897",
       username: null,
@@ -26,7 +27,7 @@
       },
       proxyProfile: "clash-socks",
       protocols: ["tcp", "udp", "dns"],
-      autoBindChildren: true,
+      autoBindChildren: false,
       forceDns: true,
       blockIpv6: true,
       blockDoh: true,
@@ -44,7 +45,7 @@
       proxyProfile: "clash-socks",
       startMode: "start_and_bind",
       runAsAdmin: false,
-      autoBindChildren: true
+      autoBindChildren: false
     }
   ],
   runtime: {
@@ -52,6 +53,7 @@
     dnsEnforced: true,
     ipv6Blocked: true,
     dohBlocked: true,
+    leakProtectionMode: "availability",
     logLevel: "info"
   }
 }

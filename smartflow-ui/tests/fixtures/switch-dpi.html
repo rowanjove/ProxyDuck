@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ProxyDuck Switch DPI Fixture</title>
+  <link rel="stylesheet" href="../../dist/styles.css" />
+  <style>
+    body {
+      min-width: 0;
+      min-height: 0;
+      overflow: auto;
+      padding: 24px;
+    }
+
+    main {
+      display: flex;
+      align-items: flex-start;
+      gap: 56px;
+    }
+
+    .preview-group {
+      display: grid;
+      gap: 14px;
+    }
+
+    .preview-group[data-scale="125"] { zoom: 1.25; }
+    .preview-group[data-scale="150"] { zoom: 1.5; }
+
+    .preview-group h1 {
+      margin: 0 0 2px;
+      font-size: 13px;
+    }
+
+    .preview-row {
+      display: flex;
+      min-width: 116px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      color: var(--secondary);
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="preview-group" data-scale="100">
+      <h1>100%</h1>
+      <div class="preview-row"><span>关闭</span><span class="switch-control"><input class="switch" type="checkbox" aria-label="100% 关闭" /><span class="switch-track" aria-hidden="true"></span></span></div>
+      <div class="preview-row"><span>开启</span><span class="switch-control"><input class="switch" type="checkbox" checked aria-label="100% 开启" /><span class="switch-track" aria-hidden="true"></span></span></div>
+      <div class="preview-row"><span>紧凑</span><span class="switch-control compact"><input class="inline-switch" type="checkbox" checked aria-label="100% 紧凑" /><span class="switch-track" aria-hidden="true"></span></span></div>
+    </section>
+    <section class="preview-group" data-scale="125">
+      <h1>125%</h1>
+      <div class="preview-row"><span>关闭</span><span class="switch-control"><input class="switch" type="checkbox" aria-label="125% 关闭" /><span class="switch-track" aria-hidden="true"></span></span></div>
+      <div class="preview-row"><span>开启</span><span class="switch-control"><input class="switch" type="checkbox" checked aria-label="125% 开启" /><span class="switch-track" aria-hidden="true"></span></span></div>
+      <div class="preview-row"><span>紧凑</span><span class="switch-control compact"><input class="inline-switch" type="checkbox" checked aria-label="125% 紧凑" /><span class="switch-track" aria-hidden="true"></span></span></div>
+    </section>
+    <section class="preview-group" data-scale="150">
+      <h1>150%</h1>
+      <div class="preview-row"><span>关闭</span><span class="switch-control"><input class="switch" type="checkbox" aria-label="150% 关闭" /><span class="switch-track" aria-hidden="true"></span></span></div>
+      <div class="preview-row"><span>开启</span><span class="switch-control"><input class="switch" type="checkbox" checked aria-label="150% 开启" /><span class="switch-track" aria-hidden="true"></span></span></div>
+      <div class="preview-row"><span>紧凑</span><span class="switch-control compact"><input class="inline-switch" type="checkbox" checked aria-label="150% 紧凑" /><span class="switch-track" aria-hidden="true"></span></span></div>
+    </section>
+  </main>
+</body>
+</html>

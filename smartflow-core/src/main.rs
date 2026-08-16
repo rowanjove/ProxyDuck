@@ -1,10 +1,12 @@
 mod api;
-mod auth;
 mod config;
 mod engine;
 mod model;
 mod process;
+mod proxy_test;
+mod routing_plan;
 mod state;
+mod validation;
 mod watcher;
 
 use std::{net::SocketAddr, path::PathBuf};
@@ -16,7 +18,7 @@ use model::UiLogEvent;
 use crate::state::CoreState;
 
 #[derive(Debug, Parser)]
-#[command(author, version, about = "SmartFlow core service")]
+#[command(author, version, about = "ProxyDuck core service")]
 struct Cli {
     #[arg(long, default_value = "127.0.0.1:46666")]
     bind: String,
@@ -30,6 +32,9 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if let Err(error) = proxyduck_common::install_panic_hook("core") {
+        eprintln!("failed to initialize crash logging: {error}");
+    }
     let cli = Cli::parse();
     init_tracing(&cli.log_level)?;
 
@@ -43,8 +48,9 @@ async fn main() -> Result<()> {
         None => config::resolve_config_path()?,
     };
 
-    let auth_token = auth::load_or_create_token()?;
+    let auth_token = proxyduck_common::load_or_create_token()?;
     let cfg = config::load_or_init(&config_path)?;
+    validation::validate_config(&cfg)?;
     let state = CoreState::new(config_path, auth_token, cfg);
     state.add_log(UiLogEvent::new(
         "info",
@@ -52,27 +58,50 @@ async fn main() -> Result<()> {
         "core service starting",
     ));
 
-    {
-        let snapshot = state.config_snapshot();
-        state.engine.start(&snapshot)?;
-    }
+    start_data_plane(&state);
 
     watcher::start_process_watcher(state.clone());
-
-    let state_for_signal = state.clone();
-    tokio::spawn(async move {
-        if tokio::signal::ctrl_c().await.is_ok() {
-            let _ = state_for_signal.engine.stop();
-        }
-    });
 
     api::run_http(state, bind).await
 }
 
+fn start_data_plane(state: &CoreState) {
+    let snapshot = state.config_snapshot();
+    if let Err(error) = state.engine.start(&snapshot) {
+        tracing::error!(%error, "data plane failed during startup; control API remains available");
+        state.add_log(UiLogEvent::new(
+            "error",
+            "engine",
+            format!("data plane startup failed: {error}"),
+        ));
+    }
+}
+
 fn init_tracing(level: &str) -> Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter(format!("smartflow_core={level},tower_http=info"))
+        .with_env_filter(format!("proxyduck_core={level},tower_http=info"))
         .json()
         .init();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn data_plane_failure_does_not_abort_core_bootstrap() {
+        let mut config = model::AppConfig::default();
+        config.runtime.enabled = true;
+        config.proxies[0].enabled = false;
+        let state = CoreState::new(PathBuf::from("unused.json5"), "test-token".into(), config);
+
+        start_data_plane(&state);
+
+        assert!(state
+            .list_logs()
+            .iter()
+            .any(|event| event.message.contains("data plane startup failed")));
+        assert_eq!(state.engine.status().phase, model::DataPlanePhase::Error);
+    }
 }
