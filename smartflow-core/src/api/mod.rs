@@ -1,4 +1,5 @@
 use std::{
+    collections::{HashMap, HashSet},
     net::SocketAddr,
     process::{Command, Stdio},
 };
@@ -27,25 +28,33 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 use crate::{
     model::{
-        AppConfig, EngineMode, HealthStatus, MatchCriteria, MatchEvent, ProcessInfo, ProxyHitStat,
-        ProxyProfile, QuickBarItem, Rule, RuleHitStat, RuleSource, RuntimeStats, StartMode,
-        UiLogEvent,
+        AppConfig, EngineCapability, EngineMode, HealthStatus, MatchCriteria, MatchEvent,
+        ProcessInfo, ProxyHitStat, ProxyProfile, ProxyTestResult, QuickBarItem, Rule, RuleHitStat,
+        RuleSource, RuntimeStats, RuntimeStatus, StartMode, UiLogEvent,
     },
-    process::{launch_quick_bar_item, list_processes},
+    process::launch_quick_bar_item,
     state::CoreState,
 };
 
 pub async fn run_http(state: CoreState, bind: SocketAddr) -> Result<()> {
-    let app = router(state);
-    tracing::info!(addr = %bind, "smartflow-core api listening");
+    let app = router(state.clone());
+    tracing::info!(addr = %bind, "proxyduck-core api listening");
     let listener = tokio::net::TcpListener::bind(bind).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            if tokio::signal::ctrl_c().await.is_ok() {
+                let _ = state.engine.stop();
+            }
+        })
+        .await?;
     Ok(())
 }
 
 fn router(state: CoreState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/capabilities", get(get_capabilities))
+        .route("/snapshot", get(get_live_snapshot))
         .route("/config", get(get_config).put(put_config))
         .route("/stats", get(get_stats))
         .route("/stats/rules", get(get_rule_stats))
@@ -55,6 +64,10 @@ fn router(state: CoreState) -> Router {
         .route("/icon/exe", get(get_exe_icon))
         .route("/processes", get(get_processes))
         .route("/rules", get(list_rules).post(create_rule))
+        .route("/rules/conflicts", get(get_rule_conflicts))
+        .route("/rules/reorder", post(reorder_rules))
+        .route("/rules/evaluate/:pid", get(evaluate_rules_for_process))
+        .route("/rules/:id/duplicate", post(duplicate_rule))
         .route("/rules/:id", put(update_rule).delete(delete_rule))
         .route("/quickbar", get(list_quickbar).post(create_quickbar))
         .route(
@@ -64,9 +77,12 @@ fn router(state: CoreState) -> Router {
         .route("/quickbar/:id/launch", post(launch_quickbar))
         .route("/proxies", get(list_proxies).post(create_proxy))
         .route("/proxies/:id", put(update_proxy).delete(delete_proxy))
+        .route("/proxies/:id/test", post(test_proxy_endpoint))
         .route("/engine/mode", post(change_engine_mode))
         .route("/runtime", post(update_runtime))
+        .route("/runtime/status", get(get_runtime_status))
         .route("/templates/ai-dev", post(apply_ai_dev_template))
+        .route("/lifecycle/shutdown", post(shutdown))
         .layer(middleware::from_fn_with_state(state.clone(), require_auth))
         .layer(
             CorsLayer::new()
@@ -81,7 +97,7 @@ fn router(state: CoreState) -> Router {
 }
 
 async fn require_auth(
-    state: CoreState,
+    State(state): State<CoreState>,
     request: Request,
     next: Next,
 ) -> Result<Response, (StatusCode, Json<ApiErrorBody>)> {
@@ -91,7 +107,13 @@ async fn require_auth(
 
     let token = request
         .headers()
-        .get("x-smartflow-token")
+        .get(proxyduck_common::AUTH_HEADER)
+        .or_else(|| {
+            request
+                .headers()
+                .get(proxyduck_common::PREVIOUS_AUTH_HEADER)
+        })
+        .or_else(|| request.headers().get(proxyduck_common::LEGACY_AUTH_HEADER))
         .and_then(|value| value.to_str().ok())
         .map(str::trim);
 
@@ -101,7 +123,7 @@ async fn require_auth(
 
     Err(err(
         StatusCode::UNAUTHORIZED,
-        "missing or invalid X-SmartFlow-Token",
+        "missing or invalid X-ProxyDuck-Token",
     ))
 }
 
@@ -174,6 +196,39 @@ async fn health(State(state): State<CoreState>) -> Json<ApiResponse<HealthStatus
     })
 }
 
+async fn get_capabilities() -> Json<ApiResponse<Vec<EngineCapability>>> {
+    ok(crate::engine::engine_capabilities())
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LiveSnapshot {
+    health: HealthStatus,
+    runtime_status: RuntimeStatus,
+    stats: RuntimeStats,
+    rule_stats: Vec<RuleHitStat>,
+    proxy_stats: Vec<ProxyHitStat>,
+    recent_hits: Vec<MatchEvent>,
+    logs: Vec<UiLogEvent>,
+}
+
+async fn get_live_snapshot(State(state): State<CoreState>) -> Json<ApiResponse<LiveSnapshot>> {
+    let config = state.config_snapshot();
+    ok(LiveSnapshot {
+        health: HealthStatus {
+            status: "ok".to_string(),
+            version: config.version,
+            engine_mode: crate::engine::mode_name(config.engine_mode),
+        },
+        runtime_status: state.runtime_status(),
+        stats: state.stats_snapshot(),
+        rule_stats: state.list_rule_hit_stats(),
+        proxy_stats: state.list_proxy_hit_stats(),
+        recent_hits: state.list_recent_matches(),
+        logs: state.list_logs(),
+    })
+}
+
 async fn get_config(State(state): State<CoreState>) -> Json<ApiResponse<AppConfig>> {
     ok(state.config_snapshot())
 }
@@ -182,26 +237,21 @@ async fn put_config(
     State(state): State<CoreState>,
     Json(payload): Json<AppConfig>,
 ) -> impl IntoResponse {
-    let mode = payload.engine_mode.clone();
-    let mut lock = state.config.write();
-    *lock = payload;
-    let cfg = lock.clone();
-    drop(lock);
-
-    if let Err(error) = state.engine.switch_mode(mode, &cfg) {
-        return err(StatusCode::BAD_REQUEST, error.to_string()).into_response();
+    match state.replace_config(payload) {
+        Ok(cfg) => {
+            state.add_log(UiLogEvent::new("info", "api", "config updated"));
+            ok(cfg).into_response()
+        }
+        Err(error) => err(StatusCode::BAD_REQUEST, error.to_string()).into_response(),
     }
-
-    if let Err(error) = state.persist_config() {
-        return err(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response();
-    }
-
-    state.add_log(UiLogEvent::new("info", "api", "config updated"));
-    ok(cfg).into_response()
 }
 
 async fn get_stats(State(state): State<CoreState>) -> Json<ApiResponse<RuntimeStats>> {
     ok(state.stats_snapshot())
+}
+
+async fn get_runtime_status(State(state): State<CoreState>) -> Json<ApiResponse<RuntimeStatus>> {
+    ok(state.runtime_status())
 }
 
 async fn get_rule_stats(State(state): State<CoreState>) -> Json<ApiResponse<Vec<RuleHitStat>>> {
@@ -244,7 +294,7 @@ fn extract_exe_icon_data_url(exe_path: &str) -> Result<String, String> {
         let script = r#"
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Drawing
-$p=$env:SMARTFLOW_ICON_PATH
+$p=$env:PROXYDUCK_ICON_PATH
 if ([string]::IsNullOrWhiteSpace($p)) { throw 'empty exe path' }
 if (!(Test-Path -LiteralPath $p)) { throw 'exe path not found' }
 $icon=[System.Drawing.Icon]::ExtractAssociatedIcon($p)
@@ -268,7 +318,7 @@ try {
             .arg("Bypass")
             .arg("-Command")
             .arg(script)
-            .env("SMARTFLOW_ICON_PATH", normalized_path)
+            .env("PROXYDUCK_ICON_PATH", normalized_path)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::null())
@@ -286,7 +336,7 @@ try {
             return Err("icon extract returned empty output".to_string());
         }
 
-        return Ok(format!("data:image/png;base64,{icon_base64}"));
+        Ok(format!("data:image/png;base64,{icon_base64}"))
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -296,12 +346,115 @@ try {
     }
 }
 
-async fn get_processes() -> Json<ApiResponse<Vec<ProcessInfo>>> {
-    ok(list_processes())
+async fn get_processes(State(state): State<CoreState>) -> Json<ApiResponse<Vec<ProcessInfo>>> {
+    ok(state.list_processes())
 }
 
 async fn list_rules(State(state): State<CoreState>) -> Json<ApiResponse<Vec<Rule>>> {
     ok(state.config.read().rules.clone())
+}
+
+async fn get_rule_conflicts(
+    State(state): State<CoreState>,
+) -> Json<ApiResponse<Vec<crate::model::RuleConflict>>> {
+    ok(crate::process::detect_rule_conflicts(
+        &state.config.read().rules,
+    ))
+}
+
+async fn evaluate_rules_for_process(
+    State(state): State<CoreState>,
+    Path(pid): Path<u32>,
+) -> impl IntoResponse {
+    let process = state
+        .list_processes()
+        .into_iter()
+        .find(|process| process.pid == pid);
+    let Some(process) = process else {
+        return err(
+            StatusCode::NOT_FOUND,
+            "process not found in the latest snapshot",
+        )
+        .into_response();
+    };
+    ok(crate::process::evaluate_rules(
+        &state.config.read().rules,
+        &process,
+    ))
+    .into_response()
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RuleReorderRequest {
+    rule_ids: Vec<String>,
+}
+
+async fn reorder_rules(
+    State(state): State<CoreState>,
+    Json(payload): Json<RuleReorderRequest>,
+) -> impl IntoResponse {
+    let current_ids = state
+        .config
+        .read()
+        .rules
+        .iter()
+        .map(|rule| rule.id.clone())
+        .collect::<HashSet<_>>();
+    let requested_ids = payload.rule_ids.iter().cloned().collect::<HashSet<_>>();
+    if payload.rule_ids.len() != requested_ids.len() || current_ids != requested_ids {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "ruleIds must contain every rule exactly once",
+        )
+        .into_response();
+    }
+
+    let positions = payload
+        .rule_ids
+        .into_iter()
+        .enumerate()
+        .map(|(index, id)| (id, index))
+        .collect::<HashMap<_, _>>();
+    match state.mutate_config(|cfg| {
+        cfg.rules
+            .sort_by_key(|rule| positions.get(&rule.id).copied().unwrap_or(usize::MAX));
+        cfg.rules.clone()
+    }) {
+        Ok(rules) => ok(rules).into_response(),
+        Err(error) => err(StatusCode::BAD_REQUEST, error.to_string()).into_response(),
+    }
+}
+
+async fn duplicate_rule(
+    State(state): State<CoreState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let source = state
+        .config
+        .read()
+        .rules
+        .iter()
+        .find(|rule| rule.id == id)
+        .cloned();
+    let Some(mut duplicate) = source else {
+        return err(StatusCode::NOT_FOUND, "rule not found").into_response();
+    };
+    let now = Utc::now();
+    duplicate.id = uuid::Uuid::new_v4().to_string();
+    duplicate.name = format!("{} Copy", duplicate.name);
+    duplicate.source = RuleSource::User;
+    duplicate.managed_by_quickbar_id = None;
+    duplicate.created_at = now;
+    duplicate.updated_at = now;
+
+    match state.mutate_config(|cfg| {
+        cfg.rules.push(duplicate.clone());
+        duplicate.clone()
+    }) {
+        Ok(rule) => ok(rule).into_response(),
+        Err(error) => err(StatusCode::BAD_REQUEST, error.to_string()).into_response(),
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -722,6 +875,31 @@ async fn list_proxies(State(state): State<CoreState>) -> Json<ApiResponse<Vec<Pr
     ok(state.config.read().proxies.clone())
 }
 
+async fn test_proxy_endpoint(
+    State(state): State<CoreState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let profile = state
+        .config
+        .read()
+        .proxies
+        .iter()
+        .find(|profile| profile.id == id)
+        .cloned();
+    let Some(profile) = profile else {
+        return err(StatusCode::NOT_FOUND, "proxy not found").into_response();
+    };
+
+    match tokio::task::spawn_blocking(move || crate::proxy_test::test_proxy(&profile)).await {
+        Ok(result) => ok::<ProxyTestResult>(result).into_response(),
+        Err(error) => err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("proxy test task failed: {error}"),
+        )
+        .into_response(),
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ProxyUpsert {
@@ -835,23 +1013,17 @@ async fn change_engine_mode(
     State(state): State<CoreState>,
     Json(payload): Json<EngineModeChange>,
 ) -> impl IntoResponse {
-    let mode = payload.mode;
+    let result = state.mutate_config(|cfg| {
+        cfg.engine_mode = payload.mode;
+    });
 
-    let mut cfg = state.config.write();
-    cfg.engine_mode = mode.clone();
-    let snapshot = cfg.clone();
-    drop(cfg);
-
-    if let Err(error) = state.engine.switch_mode(mode, &snapshot) {
-        return err(StatusCode::BAD_REQUEST, error.to_string()).into_response();
+    match result {
+        Ok(()) => {
+            state.add_log(UiLogEvent::new("info", "engine", "engine mode switched"));
+            ok("switched").into_response()
+        }
+        Err(error) => err(StatusCode::BAD_REQUEST, error.to_string()).into_response(),
     }
-
-    if let Err(error) = state.persist_config() {
-        return err(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response();
-    }
-
-    state.add_log(UiLogEvent::new("info", "engine", "engine mode switched"));
-    ok("switched").into_response()
 }
 
 #[derive(Debug, Deserialize)]
@@ -862,6 +1034,7 @@ struct RuntimeUpdate {
     ipv6_blocked: Option<bool>,
     doh_blocked: Option<bool>,
     log_level: Option<String>,
+    leak_protection_mode: Option<crate::model::LeakProtectionMode>,
 }
 
 async fn update_runtime(
@@ -883,6 +1056,9 @@ async fn update_runtime(
         }
         if let Some(log_level) = payload.log_level {
             cfg.runtime.log_level = log_level;
+        }
+        if let Some(leak_protection_mode) = payload.leak_protection_mode {
+            cfg.runtime.leak_protection_mode = leak_protection_mode;
         }
         cfg.runtime.clone()
     });
@@ -963,8 +1139,31 @@ async fn apply_ai_dev_template(
     }
 }
 
+async fn shutdown(State(state): State<CoreState>) -> impl IntoResponse {
+    if let Err(error) = state.engine.stop() {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response();
+    }
+
+    state.add_log(UiLogEvent::new(
+        "info",
+        "lifecycle",
+        "core service shutting down",
+    ));
+    tokio::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        std::process::exit(0);
+    });
+    ok("shutting_down").into_response()
+}
+
 #[cfg(test)]
 mod tests {
+    use axum::{
+        body::{to_bytes, Body},
+        http::Request,
+    };
+    use tower::ServiceExt;
+
     use super::*;
     use crate::model::AppConfig;
 
@@ -1022,5 +1221,270 @@ mod tests {
                 "{origin}"
             );
         }
+    }
+
+    fn integration_state() -> CoreState {
+        let path = std::env::temp_dir()
+            .join(uuid::Uuid::new_v4().to_string())
+            .join("config.json5");
+        let state = CoreState::new(path, "integration-token".to_string(), AppConfig::default());
+        state.engine.start(&state.config_snapshot()).unwrap();
+        state
+    }
+
+    fn api_request(method: Method, uri: &str, body: serde_json::Value) -> Request<Body> {
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header(proxyduck_common::AUTH_HEADER, "integration-token")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    async fn json_body(response: Response) -> serde_json::Value {
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn integration_auth_and_snapshot_contract() {
+        let state = integration_state();
+        let app = router(state);
+        let unauthorized = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/snapshot")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+        let previous_brand_authorized = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/snapshot")
+                    .header(proxyduck_common::PREVIOUS_AUTH_HEADER, "integration-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(previous_brand_authorized.status(), StatusCode::OK);
+
+        let authorized = app
+            .oneshot(api_request(Method::GET, "/snapshot", serde_json::json!({})))
+            .await
+            .unwrap();
+        assert_eq!(authorized.status(), StatusCode::OK);
+        let bytes = to_bytes(authorized.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["ok"], true);
+        assert_eq!(
+            body["data"]["runtimeStatus"]["dataPlane"]["phase"],
+            "paused"
+        );
+    }
+
+    #[tokio::test]
+    async fn integration_concurrent_rule_creates_do_not_overwrite_each_other() {
+        let state = integration_state();
+        let app = router(state.clone());
+        let payload = |name: &str| {
+            serde_json::json!({
+                "name": name,
+                "matcher": { "appNames": [format!("{name}.exe")], "exePaths": [], "pids": [], "hashes": [], "wildcard": null },
+                "proxyProfile": "clash-socks",
+                "protocols": ["tcp"],
+                "enabled": true
+            })
+        };
+        let first = app
+            .clone()
+            .oneshot(api_request(Method::POST, "/rules", payload("first")));
+        let second = app.oneshot(api_request(Method::POST, "/rules", payload("second")));
+        let (first, second) = tokio::join!(first, second);
+        assert_eq!(first.unwrap().status(), StatusCode::OK);
+        assert_eq!(second.unwrap().status(), StatusCode::OK);
+        assert_eq!(state.config_snapshot().rules.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn integration_invalid_import_preserves_current_config() {
+        let state = integration_state();
+        let original = state.config_snapshot();
+        let mut invalid = original.clone();
+        invalid.schema_version = crate::config::CURRENT_SCHEMA_VERSION + 1;
+        let response = router(state.clone())
+            .oneshot(api_request(
+                Method::PUT,
+                "/config",
+                serde_json::to_value(invalid).unwrap(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            state.config_snapshot().schema_version,
+            original.schema_version
+        );
+        assert_eq!(state.config_snapshot().rules.len(), original.rules.len());
+    }
+
+    #[tokio::test]
+    async fn integration_proxy_and_rule_crud_reorder_duplicate_contract() {
+        let state = integration_state();
+        let app = router(state.clone());
+
+        let response = app
+            .clone()
+            .oneshot(api_request(
+                Method::POST,
+                "/proxies",
+                serde_json::json!({
+                    "id": "integration-proxy",
+                    "name": "Integration proxy",
+                    "kind": "socks5",
+                    "endpoint": "127.0.0.1:1080",
+                    "username": "test",
+                    "password": "secret",
+                    "enabled": true
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(json_body(response).await["data"]["id"], "integration-proxy");
+
+        let response = app
+            .clone()
+            .oneshot(api_request(
+                Method::PUT,
+                "/proxies/integration-proxy",
+                serde_json::json!({
+                    "name": "Updated proxy",
+                    "kind": "socks5",
+                    "endpoint": "127.0.0.1:1081",
+                    "username": null,
+                    "password": null,
+                    "enabled": true
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            json_body(response).await["data"]["endpoint"],
+            "127.0.0.1:1081"
+        );
+
+        let rule_payload = |name: &str| {
+            serde_json::json!({
+                "name": name,
+                "matcher": { "appNames": [format!("{name}.exe")], "exePaths": [], "pids": [], "hashes": [], "wildcard": null },
+                "proxyProfile": "integration-proxy",
+                "protocols": ["tcp", "udp"],
+                "enabled": true,
+                "autoBindChildren": false,
+                "forceDns": false,
+                "blockIpv6": false,
+                "blockDoh": false
+            })
+        };
+        let first = app
+            .clone()
+            .oneshot(api_request(Method::POST, "/rules", rule_payload("first")))
+            .await
+            .unwrap();
+        let first_id = json_body(first).await["data"]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let second = app
+            .clone()
+            .oneshot(api_request(Method::POST, "/rules", rule_payload("second")))
+            .await
+            .unwrap();
+        let second_id = json_body(second).await["data"]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let duplicate = app
+            .clone()
+            .oneshot(api_request(
+                Method::POST,
+                &format!("/rules/{first_id}/duplicate"),
+                serde_json::json!({}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(duplicate.status(), StatusCode::OK);
+        let duplicate_id = json_body(duplicate).await["data"]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let response = app
+            .clone()
+            .oneshot(api_request(
+                Method::POST,
+                "/rules/reorder",
+                serde_json::json!({ "ruleIds": [&duplicate_id, &second_id, &first_id] }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(state.config_snapshot().rules[0].id, duplicate_id);
+
+        let response = app
+            .clone()
+            .oneshot(api_request(
+                Method::PUT,
+                &format!("/rules/{first_id}"),
+                serde_json::json!({
+                    "name": "renamed",
+                    "matcher": { "appNames": ["renamed.exe"], "exePaths": [], "pids": [], "hashes": [], "wildcard": null },
+                    "proxyProfile": "integration-proxy",
+                    "protocols": ["tcp"],
+                    "enabled": false
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(json_body(response).await["data"]["enabled"], false);
+
+        for id in [&duplicate_id, &second_id, &first_id] {
+            let response = app
+                .clone()
+                .oneshot(api_request(
+                    Method::DELETE,
+                    &format!("/rules/{id}"),
+                    serde_json::json!({}),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+        }
+        let response = app
+            .oneshot(api_request(
+                Method::DELETE,
+                "/proxies/integration-proxy",
+                serde_json::json!({}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(state.config_snapshot().rules.is_empty());
+        assert!(state
+            .config_snapshot()
+            .proxies
+            .iter()
+            .all(|proxy| proxy.id != "integration-proxy"));
     }
 }

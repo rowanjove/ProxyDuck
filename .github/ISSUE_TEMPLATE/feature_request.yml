@@ -1,0 +1,38 @@
+name: 功能建议
+description: 描述你真正想解决的使用问题
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 使用场景与问题
+      description: 你在什么情况下遇到了什么阻碍？
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: 期望结果
+      description: 如果问题被解决，理想的操作流程是什么？
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 已尝试的替代方案
+  - type: dropdown
+    id: area
+    attributes:
+      label: 相关区域
+      options:
+        - 规则与进程匹配
+        - 代理与连通性
+        - 路由引擎
+        - 桌面界面
+        - CLI 与自动化
+        - 安装、更新与发布
+        - 文档
+        - 其他
+    validations:
+      required: true

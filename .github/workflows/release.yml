@@ -1,0 +1,84 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version without the v prefix
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  windows-release:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: npm ci
+      - name: Install Playwright browser
+        run: npx playwright install chromium
+      - name: Verify source
+        shell: pwsh
+        run: .\scripts\verify-release.ps1
+      - name: Build portable release
+        shell: pwsh
+        run: .\scripts\build-release.ps1
+      - name: Smoke-test portable release
+        shell: pwsh
+        run: .\scripts\smoke-release.ps1
+      - name: Sign binaries when credentials are configured
+        shell: pwsh
+        env:
+          PROXYDUCK_SIGNING_PFX_BASE64: ${{ secrets.PROXYDUCK_SIGNING_PFX_BASE64 || secrets.PROXYDOCK_SIGNING_PFX_BASE64 }}
+          PROXYDUCK_SIGNING_PFX_PASSWORD: ${{ secrets.PROXYDUCK_SIGNING_PFX_PASSWORD || secrets.PROXYDOCK_SIGNING_PFX_PASSWORD }}
+        run: .\scripts\sign-release.ps1 -Directory .\release\ProxyDuck
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $version = if ('${{ github.event_name }}' -eq 'workflow_dispatch') { '${{ inputs.version }}' } else { '${{ github.ref_name }}'.TrimStart('v') }
+          $packageVersion = (Get-Content .\package.json -Raw | ConvertFrom-Json).version
+          if ($version -ne $packageVersion) { throw "release version $version does not match package version $packageVersion" }
+          "value=$version" >> $env:GITHUB_OUTPUT
+      - name: Build installer
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          iscc "/DAppVersion=${{ steps.version.outputs.value }}" .\installer\ProxyDuck.iss
+      - name: Sign installer when credentials are configured
+        shell: pwsh
+        env:
+          PROXYDUCK_SIGNING_PFX_BASE64: ${{ secrets.PROXYDUCK_SIGNING_PFX_BASE64 || secrets.PROXYDOCK_SIGNING_PFX_BASE64 }}
+          PROXYDUCK_SIGNING_PFX_PASSWORD: ${{ secrets.PROXYDUCK_SIGNING_PFX_PASSWORD || secrets.PROXYDOCK_SIGNING_PFX_PASSWORD }}
+        run: .\scripts\sign-release.ps1 -Directory .\release\installer
+      - name: Package and hash artifacts
+        shell: pwsh
+        run: |
+          Compress-Archive -Path .\release\ProxyDuck -DestinationPath ".\release\ProxyDuck-${{ steps.version.outputs.value }}-portable.zip" -Force
+          Get-ChildItem .\release\*.zip, .\release\installer\*.exe | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $([IO.Path]::GetFileName($_.Path))" } | Set-Content .\release\SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ProxyDuck-${{ steps.version.outputs.value }}
+          path: |
+            release/*-portable.zip
+            release/installer/*.exe
+            release/SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            release/*-portable.zip
+            release/installer/*.exe
+            release/SHA256SUMS.txt
+          generate_release_notes: true

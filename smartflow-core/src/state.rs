@@ -1,12 +1,15 @@
 use std::{collections::VecDeque, path::PathBuf, sync::Arc};
 
 use anyhow::Result;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 
 use crate::{
     config,
     engine::{mode_name, EngineManager},
-    model::{AppConfig, MatchEvent, ProxyHitStat, RuleHitStat, RuntimeStats, UiLogEvent},
+    model::{
+        AppConfig, MatchEvent, ProcessInfo, ProxyHitStat, RuleHitStat, RuntimeStats, RuntimeStatus,
+        UiLogEvent,
+    },
 };
 
 const MAX_LOGS: usize = 500;
@@ -20,20 +23,19 @@ pub struct CoreState {
     pub stats: Arc<RwLock<RuntimeStats>>,
     pub logs: Arc<RwLock<VecDeque<UiLogEvent>>>,
     pub recent_matches: Arc<RwLock<VecDeque<MatchEvent>>>,
+    pub processes: Arc<RwLock<Vec<ProcessInfo>>>,
     pub engine: Arc<EngineManager>,
+    config_transaction: Arc<Mutex<()>>,
 }
 
 impl CoreState {
     pub fn new(config_path: PathBuf, auth_token: String, config_data: AppConfig) -> Self {
         let stats = Arc::new(RwLock::new(RuntimeStats {
-            engine_mode: mode_name(config_data.engine_mode.clone()),
+            engine_mode: mode_name(config_data.engine_mode),
             ..RuntimeStats::default()
         }));
 
-        let engine = Arc::new(EngineManager::new(
-            config_data.engine_mode.clone(),
-            stats.clone(),
-        ));
+        let engine = Arc::new(EngineManager::new(config_data.engine_mode, stats.clone()));
 
         Self {
             config_path,
@@ -42,7 +44,9 @@ impl CoreState {
             stats,
             logs: Arc::new(RwLock::new(VecDeque::with_capacity(MAX_LOGS))),
             recent_matches: Arc::new(RwLock::new(VecDeque::with_capacity(MAX_MATCH_EVENTS))),
+            processes: Arc::new(RwLock::new(Vec::new())),
             engine,
+            config_transaction: Arc::new(Mutex::new(())),
         }
     }
 
@@ -80,6 +84,14 @@ impl CoreState {
         self.recent_matches.read().iter().cloned().collect()
     }
 
+    pub fn update_processes(&self, processes: Vec<ProcessInfo>) {
+        *self.processes.write() = processes;
+    }
+
+    pub fn list_processes(&self) -> Vec<ProcessInfo> {
+        self.processes.read().clone()
+    }
+
     pub fn list_rule_hit_stats(&self) -> Vec<RuleHitStat> {
         let config = self.config.read();
         let stats = self.stats.read();
@@ -89,11 +101,7 @@ impl CoreState {
             .map(|(rule_id, hits)| {
                 let rule = config.rules.iter().find(|rule| &rule.id == rule_id);
                 let (rule_name, proxy_id, source) = match rule {
-                    Some(rule) => (
-                        rule.name.clone(),
-                        rule.proxy_profile.clone(),
-                        rule.source.clone(),
-                    ),
+                    Some(rule) => (rule.name.clone(), rule.proxy_profile.clone(), rule.source),
                     None => (
                         "<deleted rule>".to_string(),
                         "<unknown proxy>".to_string(),
@@ -166,20 +174,58 @@ impl CoreState {
         self.stats.read().clone()
     }
 
-    pub fn persist_config(&self) -> Result<()> {
-        let cfg = self.config.read().clone();
-        config::save(&self.config_path, &cfg)
+    pub fn runtime_status(&self) -> RuntimeStatus {
+        let config = self.config_snapshot();
+        RuntimeStatus {
+            desired_enabled: config.runtime.enabled,
+            engine_mode: config.engine_mode,
+            data_plane: self.engine.status(),
+        }
     }
 
     pub fn mutate_config<F, T>(&self, f: F) -> Result<T>
     where
         F: FnOnce(&mut AppConfig) -> T,
     {
-        let mut guard = self.config.write();
-        let output = f(&mut guard);
-        config::save(&self.config_path, &guard)?;
-        self.engine.reload_rules(&guard)?;
+        let _transaction = self.config_transaction.lock();
+        let previous = self.config_snapshot();
+        let mut next = previous.clone();
+        let output = f(&mut next);
+        self.apply_config(&previous, &next)?;
+        *self.config.write() = next;
         Ok(output)
+    }
+
+    pub fn replace_config(&self, next: AppConfig) -> Result<AppConfig> {
+        let _transaction = self.config_transaction.lock();
+        let previous = self.config_snapshot();
+        self.apply_config(&previous, &next)?;
+        *self.config.write() = next.clone();
+        Ok(next)
+    }
+
+    fn apply_config(&self, previous: &AppConfig, next: &AppConfig) -> Result<()> {
+        crate::validation::validate_config(next)?;
+        let mode_changed = mode_name(previous.engine_mode) != mode_name(next.engine_mode);
+
+        let engine_result = if mode_changed {
+            self.engine.switch_mode(next.engine_mode, next)
+        } else {
+            self.engine.reload_rules(next)
+        };
+
+        engine_result?;
+
+        if let Err(error) = config::save(&self.config_path, next) {
+            if mode_changed {
+                let _ = self.engine.switch_mode(previous.engine_mode, previous);
+            } else {
+                let _ = self.engine.reload_rules(previous);
+            }
+            return Err(error);
+        }
+
+        Ok(())
     }
 }
 

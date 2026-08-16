@@ -1,9 +1,13 @@
 node_modules/
+playwright-report/
+test-results/
 target/
 release/
 third_party/proxifyre/pkg/
 third_party/proxifyre/proxifyre.zip
 third_party/proxifyre/**/logs/
+third_party/winpkfilter/
+third_party/licenses/
 *.log
 *.tmp
 Thumbs.db

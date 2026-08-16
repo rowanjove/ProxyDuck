@@ -77,17 +77,17 @@ function Resolve-ReleaseAsset {
     return (Resolve-Path -LiteralPath $candidate).Path
   }
 
-  $packageDir = Join-Path $RootPath "release\SmartFlow"
+  $packageDir = Join-Path $RootPath "release\ProxyDuck"
   if (!(Test-Path -LiteralPath $packageDir)) {
     throw "No release asset was provided and default package directory was not found: $packageDir. Run .\scripts\build-release.ps1 first, pass -AssetPath, or use -SkipAsset."
   }
 
-  $archivePath = Join-Path (Join-Path $RootPath "release") "SmartFlow-$ReleaseTag.zip"
+  $archivePath = Join-Path (Join-Path $RootPath "release") "ProxyDuck-$ReleaseTag.zip"
   if (Test-Path -LiteralPath $archivePath) {
     Remove-Item -LiteralPath $archivePath -Force
   }
 
-  Write-Host "[SmartFlow] Packaging release asset: $archivePath"
+  Write-Host "[ProxyDuck] Packaging release asset: $archivePath"
   Compress-Archive -Path $packageDir -DestinationPath $archivePath -CompressionLevel Optimal -Force
 
   return $archivePath
@@ -112,7 +112,7 @@ function Resolve-ReleaseNotesFile {
   }
 
   if (!(Test-Path -LiteralPath $candidate)) {
-    Write-Host "[SmartFlow] Release notes file not found, falling back to generated notes: $candidate"
+    Write-Host "[ProxyDuck] Release notes file not found, falling back to generated notes: $candidate"
     return $null
   }
 
@@ -149,7 +149,7 @@ if ((& git -C $rootPath remote get-url origin 2>$null)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($originUrl)) {
-  Write-Host "[SmartFlow] Creating GitHub repo $Repo ($Visibility) and pushing source..."
+  Write-Host "[ProxyDuck] Creating GitHub repo $Repo ($Visibility) and pushing source..."
   Invoke-External gh @(
     "repo",
     "create",
@@ -162,7 +162,7 @@ if ([string]::IsNullOrWhiteSpace($originUrl)) {
     "--push"
   )
 } else {
-  Write-Host "[SmartFlow] Pushing source to existing origin..."
+  Write-Host "[ProxyDuck] Pushing source to existing origin..."
   Invoke-External git @("-C", $rootPath, "push", "-u", "origin", "HEAD")
 }
 
@@ -175,20 +175,20 @@ $notesFile = Resolve-ReleaseNotesFile -RootPath $rootPath -RequestedNotesPath $N
 
 $tagExists = Invoke-External git @("-C", $rootPath, "tag", "-l", $Tag) -CaptureOutput
 if ([string]::IsNullOrWhiteSpace($tagExists)) {
-  Invoke-External git @("-C", $rootPath, "tag", "-a", $Tag, "-m", "SmartFlow release $Tag")
+  Invoke-External git @("-C", $rootPath, "tag", "-a", $Tag, "-m", "ProxyDuck release $Tag")
 }
 
 Invoke-External git @("-C", $rootPath, "push", "origin", $Tag)
 
 if ($asset) {
-  Write-Host "[SmartFlow] Creating GitHub release $Tag with asset: $asset"
+  Write-Host "[ProxyDuck] Creating GitHub release $Tag with asset: $asset"
   $arguments = @(
     "release",
     "create",
     $Tag,
     $asset,
     "--title",
-    "SmartFlow $Tag"
+    "ProxyDuck $Tag"
   )
   if ($notesFile) {
     $arguments += @("--notes-file", $notesFile)
@@ -197,13 +197,13 @@ if ($asset) {
   }
   Invoke-External -FilePath gh -Arguments $arguments
 } else {
-  Write-Host "[SmartFlow] Creating GitHub release $Tag without a binary asset"
+  Write-Host "[ProxyDuck] Creating GitHub release $Tag without a binary asset"
   $arguments = @(
     "release",
     "create",
     $Tag,
     "--title",
-    "SmartFlow $Tag"
+    "ProxyDuck $Tag"
   )
   if ($notesFile) {
     $arguments += @("--notes-file", $notesFile)
@@ -213,4 +213,4 @@ if ($asset) {
   Invoke-External -FilePath gh -Arguments $arguments
 }
 
-Write-Host "[SmartFlow] Done."
+Write-Host "[ProxyDuck] Done."

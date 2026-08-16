@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Install JavaScript dependencies
+        run: npm ci
+      - name: Rust formatting
+        run: cargo fmt --all -- --check
+      - name: Rust lint
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Rust tests
+        run: cargo test --workspace --all-targets
+      - name: UI tests
+        run: npm test
+      - name: Install Playwright browser
+        run: npx playwright install chromium
+      - name: UI end-to-end tests
+        run: npm run test:e2e
+      - name: UI syntax
+        run: npm run check:ui
+      - name: Release compile smoke test
+        run: cargo build --release --workspace
