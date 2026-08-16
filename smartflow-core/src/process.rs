@@ -45,7 +45,7 @@ impl ProcessScanner {
             })
             .collect();
 
-        rows.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        rows.sort_by_key(|item| item.name.to_lowercase());
         rows
     }
 }
