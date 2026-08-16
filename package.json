@@ -4,7 +4,7 @@
   "description": "Fast per-application proxy routing for Windows.",
   "scripts": {
     "icon:build": "powershell -ExecutionPolicy Bypass -File .\\scripts\\generate-icon.ps1",
-    "test": "node --test smartflow-ui/tests/*.test.mjs",
+    "test": "node --test smartflow-ui/tests/i18n.test.mjs smartflow-ui/tests/lib.test.mjs smartflow-ui/tests/visual-structure.test.mjs",
     "test:e2e": "playwright test",
     "check:ui": "node --check smartflow-ui/dist/app.js && node --check smartflow-ui/dist/api.mjs && node --check smartflow-ui/dist/lib.mjs && node --check smartflow-ui/dist/i18n.mjs",
     "verify": "powershell -ExecutionPolicy Bypass -File .\\scripts\\verify-release.ps1",
