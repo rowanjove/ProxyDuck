@@ -1,8 +1,12 @@
-<div align="center">
+﻿<div align="center">
   <img src="smartflow-ui/src-tauri/icons/icon.png" width="110" alt="ProxyDuck 图标" />
   <h1>ProxyDuck</h1>
   <p><strong>面向进程的 Windows 应用流量分流与网络诊断工具</strong></p>
   <p>精准识别应用进程，将 TCP/UDP 流量重定向至指定的本地 SOCKS5 代理端口。</p>
+
+  [简体中文](README.md) | [English](README.en.md)
+
+  <br />
 
   [![Version](https://img.shields.io/badge/version-1.1.0-23b7a8?style=flat-square)](https://github.com/rowanjove/ProxyDuck/releases)
   [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-1674b1?style=flat-square&logo=windows)](#系统要求)
@@ -34,7 +38,7 @@
 
 <sub>截图来自 ProxyDuck 1.1.0 隔离测试配置，所有代理端点均为本机回环地址，不含真实用户数据。</sub>
 
-## 它擅长什么
+## 核心特性
 
 | 能力 | 说明 |
 | --- | --- |
@@ -61,44 +65,40 @@
 
 ### 2. 准备本地代理
 
-先让 Clash、sing-box、V2Ray 或其他代理程序开放一个本地 SOCKS5 端口，例如：
+让 Clash、sing-box、V2Ray 或其他代理程序开放一个本地 SOCKS5 端口，例如：
 
 ```text
 127.0.0.1:7897
 ```
 
-### 3. 添加代理与规则
+### 3. 添加端点与路由规则
 
-在“代理”中添加本地 SOCKS5 端点并执行连通性测试，然后在“规则”中选择应用和目标代理。
+在“代理端点”中添加本地 SOCKS5 地址并进行连通性测试，然后在“应用路由”中新建规则指定程序名与代理。
 
-### 4. 打开路由
+### 4. 开启路由
 
-回到“概览”，打开右上角的路由开关。看到数据平面进入“运行中”后，最近活动会开始记录进程匹配；这不是连接数、字节数或 DNS 查询统计。
+在“概览”页右上角打开路由开关。当状态显示“运行中”后，匹配规则的应用程序流量将自动被接管分流。
 
-## 默认带了什么
-
-官方 Windows x64 包坚持一个克制的选择：**开箱即用的只带一套主数据平面，其余引擎按需安装。**
+## 数据平面与引擎支持
 
 | 组件 | 默认状态 | 版本 | 用途 |
 | --- | --- | --- | --- |
 | ProxiFyre | 已内置 | 2.4.0 x64 | 将指定进程的 TCP、UDP 流量转入 SOCKS5 |
 | WinpkFilter | 已内置 | 3.6.2.1 x64 | ProxiFyre 使用的 Windows 数据包过滤驱动 |
 | sing-box TUN | 用户安装 | 自动探测 | 可选的第二数据平面 |
-| 原生 WFP | 尚未提供 | — | 需要独立签名驱动，列入后续路线图 |
-| API Hook | 实验阶段 | — | 当前不会伪装成可用能力 |
+| 原生 WFP | 规划中 | — | 需要独立内核签名驱动，列入后续规划 |
 
-版本、下载地址、文件大小与上游 SHA-256 固定在 [`third_party/default-runtimes.json`](third_party/default-runtimes.json)。构建脚本还会生成第二层 `RUNTIME-LOCK.json`，逐个校验发行包中的运行时文件。
+版本、下载地址与 SHA-256 校验哈希固定在 [`third_party/default-runtimes.json`](third_party/default-runtimes.json)。
 
-第三方许可证见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)，精确源码版本见 [`THIRD_PARTY_SOURCES.md`](THIRD_PARTY_SOURCES.md)。
+第三方许可证见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)，源码版本见 [`THIRD_PARTY_SOURCES.md`](THIRD_PARTY_SOURCES.md)。
 
 ## 系统要求
 
-- Windows 10 / 11 x64
-- 管理员权限——仅安装驱动和注册 Windows Service 时需要；日常已安装服务的桌面控制端可使用标准用户权限
-- 一个可用的本地 SOCKS5 代理端点
-- WebView2 Runtime（Windows 11 通常已内置）
+- 操作系统：Windows 10 / 11 x64
+- 权限说明：仅在安装 WinpkFilter 驱动与注册 Windows Service 时需要管理员权限；已安装服务的桌面端可使用标准普通用户权限运行
+- 依赖项：本地可用的 SOCKS5 代理端点、WebView2 Runtime（Windows 11 已自带）
 
-## 命令行
+## 命令行操作 (CLI)
 
 ```powershell
 # 查看整体状态
@@ -108,131 +108,84 @@
 .\proxyduck-cli.exe runtime on
 .\proxyduck-cli.exe runtime off
 
-# 切换到默认 ProxiFyre 数据平面
+# 切换路由引擎
 .\proxyduck-cli.exe mode set proxifyre
 
-# 旧版命令仍可兼容
-.\proxyduck-cli.exe mode set win-divert
-
-# 查看代理、规则、进程与日志
+# 查看端点并导入本地配置（先预览，再提交）
 .\proxyduck-cli.exe proxies list
-# 先预览 Clash/sing-box 本地端点，再显式提交合并
 .\proxyduck-cli.exe proxies import .\clash.json
 .\proxyduck-cli.exe proxies import .\clash.json --apply
+
+# 规则与配置方案管理
 .\proxyduck-cli.exe rules list
 .\proxyduck-cli.exe profiles list
 .\proxyduck-cli.exe profiles create "开发环境"
 .\proxyduck-cli.exe profiles diff <profile-id>
+
+# 进程与日志查看
 .\proxyduck-cli.exe processes list --filter code --limit 20
 .\proxyduck-cli.exe logs --tail 50
 ```
 
-服务已安装时 CLI 与桌面端一样自动走 Named Pipe；未安装服务时默认连接 `http://127.0.0.1:46666`，也可以通过 `--core-url` 指定其他本地地址。
+服务已安装时 CLI 与桌面端自动通过 Named Pipe 通信；未安装服务时回退至 `http://127.0.0.1:46666`。
 
-## 它是怎么工作的
+## 架构原理
 
 ```mermaid
 flowchart LR
     UI["ProxyDuck 桌面端"] -->|"Named Pipe + Windows ACL"| Service["ProxyDuck Core Service"]
     UI -->|"localhost + 随机令牌（开发回退）"| Core["proxyduck-core"]
-    CLI["proxyduck-cli"] -->|"本地 HTTP API"| Core
+    CLI["proxyduck-cli"] -->|"本地 HTTP / Named Pipe"| Core
     Service --> Core
-    Core --> Rules["进程发现与规则编译"]
-    Rules --> Plane["ProxiFyre + WinpkFilter"]
-    Plane --> Socks["Clash / sing-box / V2Ray 的本地 SOCKS5"]
+    Core --> Rules["进程匹配与策略编译"]
+    Rules --> Plane["ProxiFyre + WinpkFilter / sing-box TUN"]
+    Plane --> Socks["本地 SOCKS5 代理 (Clash / sing-box / v2ray)"]
 ```
-
-- **桌面端**负责配置、状态、托盘和日常交互；检测到已安装服务时通过 Named Pipe 调用 Core。
-- **Windows Service**负责无人值守的 Core、引擎和健康检查生命周期；Named Pipe 按安装用户 SID、Administrators 和 SYSTEM 限制访问。
-- **Core**负责进程发现、确定性匹配、运行时生命周期、防泄漏策略与本地 API。
-- **数据平面**负责真正接管并转送目标应用的流量。
-- **CLI**与桌面端共享同一套鉴权和配置语义，适合自动化与诊断。
 
 ## 从源码构建
 
-需要 Rust stable、Node.js 20+、Visual Studio 2022 C++ Build Tools 与 Windows 10/11 x64。
+环境要求：Rust stable、Node.js 20+、Visual Studio 2022 C++ Build Tools、Windows 10/11 x64。
 
 ```powershell
 npm install
 npx playwright install chromium
 
-# 完整检查
+# 运行完整质量与一致性检查
 .\scripts\verify-release.ps1
 
-# 构建默认发行目录
+# 编译并生成 release 发行目录
 .\scripts\build-release.ps1
 
-# 生成 portable zip、发布 manifest 与 SHA-256 清单
+# 打包便携版 zip 与发布清单
 .\scripts\package-release.ps1
-
-# 只有本轮 ISCC 已生成 installer proof 时，才同时打包安装器
-.\scripts\package-release.ps1 -RequireInstaller
 ```
 
-打包会生成 `release/release-manifest.json`，记录 buildId、源码提交、运行时锁哈希、载荷哈希和签名状态；它与 `SHA256SUMS.txt` 一起作为后续更新器或发布审计的输入。
+构建脚本会自动拉取并校验固定哈希的 ProxiFyre 与 WinpkFilter 官方发行包，缓存文件不会被提交至 Git。
 
-本地构建默认允许未签名，便于开发和测试；正式 Release workflow 会强制要求
-`PROXYDUCK_SIGNING_PFX_BASE64` 与 `PROXYDUCK_SIGNING_PFX_PASSWORD`，并在签名后验证
-所有 EXE 的 Authenticode 状态。若要在受控构建机上复现该门禁，可运行：
+## 本地数据与安全
 
-```powershell
-.\scripts\sign-release.ps1 -Directory .\release\ProxyDuck -RequireSignature
-.\scripts\sign-release.ps1 -Directory .\release\installer -RequireSignature
-.\scripts\package-release.ps1 -RequireInstaller -RequireSignature
-# 正式发布还应在干净 checkout 上增加：-RequireCleanSource
-```
+未安装服务模式下数据存储于用户应用数据目录：
 
-`build-release.ps1` 会下载并校验锁定版本的 ProxiFyre、WinpkFilter 与许可证文本；这些缓存文件不会提交到 Git。
+- `config.json5`：代理、规则、配置方案与设置
+- `token`：本地 API 鉴权令牌，受当前用户 Windows DPAPI 保护
+- `core.log`：核心启动与运行时日志
+- `crash.log`：异常崩溃追踪
 
-sing-box 默认不下载。如需制作自定义捆绑包：
-
-```powershell
-.\scripts\build-release.ps1 `
-  -BundleSingBox `
-  -SingBoxPath "C:\path\to\sing-box.exe"
-```
-
-## 配置与数据
-
-未安装服务的开发/portable 模式使用当前用户应用数据目录保存：
-
-- `config.json5`：代理、规则、快捷启动与运行设置
-- `token`：本地 API 鉴权令牌，使用当前用户 DPAPI 加密
-- `core.log`：核心启动和数据平面错误
-- `crash.log`：本地崩溃记录与回溯
-
-首次运行会自动迁移 ProxyDock 与更早的 SmartFlow 配置；旧目录不会被删除。
-
-安装服务时会把配置迁移到 `%ProgramData%\ProxyDuck\config.json5`，由服务作为运行时真相；安装过程在原用户会话中把已有 Current User DPAPI 凭据重加密到 `%ProgramData%\ProxyDuck\secrets` 的 machine scope。任何凭据无法迁移都会阻止服务安装，不会静默丢失认证。
-
-常用环境变量：
-
-- `PROXYDUCK_CORE_URL`：Core API 地址
-- `PROXYDUCK_PROXIFYRE_DIR`：自定义 ProxiFyre 目录
-- `PROXYDUCK_SING_BOX_PATH`：用户安装的 `sing-box.exe` 路径
-- `PROXYDUCK_ICON_DIR`：进程图标缓存目录
-
-发布清单可用以下命令离线复核；它会重新计算 portable、installer、各 EXE 和运行时锁的哈希：
-
-```powershell
-.\scripts\verify-release-manifest.ps1
-```
+安装 Windows Service 后，配置自动安全迁移至 `%ProgramData%\ProxyDuck\config.json5`，由服务进程作为统一运行时真相，凭据转换为 machine scope 保护。
 
 ## 项目沿革
 
-ProxyDuck 的前身是 **SmartFlow**。随着项目从简单的规则原型成长为包含桌面端、Core、CLI、真实数据平面与发布工程的完整软件，我们决定换一个更清楚、也更有记忆点的名字，从 **1.0.0** 重新出发。
+ProxyDuck 的前身是 **SmartFlow**。随着项目从简单的规则原型成长为包含桌面端、后台服务、CLI、驱动级数据平面与完整发布工程的软件，统一更名为 ProxyDuck。产品公开版本从 **1.0.0** 重新启程。
 
-旧 SmartFlow 仓库已经转为私有历史存档，不再接收更新；所有公开开发、Issue、Release 与路线图都将在本仓库继续。源码目录中仍保留部分 `smartflow-*` 物理文件夹，以避免无意义地破坏 Git 历史和外部脚本，产品标识与发布物均已使用 ProxyDuck。
+## 路线图与社区
 
-## 路线图与参与开发
-
-- 完整版本路线图：[`ROADMAP.md`](ROADMAP.md)
-- 贡献代码、文档或测试：[`CONTRIBUTING.md`](CONTRIBUTING.md)
-- 报告安全问题：[`SECURITY.md`](SECURITY.md)
+- 版本路线图：[`ROADMAP.md`](ROADMAP.md)
+- 参与贡献：[`CONTRIBUTING.md`](CONTRIBUTING.md)
+- 安全报告：[`SECURITY.md`](SECURITY.md)
 - 版本更新记录：[`CHANGELOG.md`](CHANGELOG.md)
 
 欢迎提交 Issue 与 Pull Request 反馈问题或建议。提交 Bug 时请附带环境信息与诊断日志，便于快速排查定位。
 
 ## 开源许可
 
-ProxyDuck 自有源码采用 [MIT License](LICENSE)。第三方运行时保留各自许可证，MIT 许可不覆盖 ProxiFyre、WinpkFilter 或用户自行安装的其他代理内核。
+ProxyDuck 自有源码采用 [MIT License](LICENSE)。第三方运行时保留各自许可证，MIT 许可不覆盖 ProxiFyre、WinpkFilter 或用户自行安装的代理内核。
