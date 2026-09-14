@@ -3,11 +3,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::model::{AppConfig, EngineMode, ProxyKind};
+use crate::model::{AppConfig, DnsMode, EngineMode, ProxyKind, ProxyProfile, RouteAction};
 use anyhow::{anyhow, bail, Context, Result};
 
 const CONFIG_FILE: &str = "config.json5";
-pub const CURRENT_SCHEMA_VERSION: u32 = 3;
+pub const CURRENT_SCHEMA_VERSION: u32 = 6;
 
 pub fn resolve_config_path() -> Result<PathBuf> {
     proxyduck_common::resolve_app_file(CONFIG_FILE)
@@ -48,12 +48,102 @@ pub fn load_or_init(path: &Path) -> Result<AppConfig> {
         }
     };
     let migrated = migrate_schema(&mut parsed)?;
+    let secrets = hydrate_proxy_secrets(&mut parsed)?;
     let normalized = normalize_legacy_capabilities(&mut parsed);
-    if parsed.version != env!("CARGO_PKG_VERSION") || recovered || migrated || normalized {
+    if parsed.version != env!("CARGO_PKG_VERSION") || recovered || migrated || normalized || secrets
+    {
         parsed.version = env!("CARGO_PKG_VERSION").to_string();
-        write_config(path, &parsed, !recovered)?;
+        // A legacy file may still contain a plaintext password.  Never copy
+        // that raw payload into the last-known-good backup before the
+        // migration has moved the credential into SecretStore.
+        write_config(path, &parsed, !recovered && !secrets)?;
+        if secrets {
+            write_sanitized_backup(path, &parsed)?;
+        }
     }
     Ok(parsed)
+}
+
+/// Migrates an already decoded config payload, such as an API import, using
+/// the same compatibility rules as file loading. The caller still owns the
+/// transaction and validation step.
+pub fn migrate_import(config: &mut AppConfig) -> Result<bool> {
+    let mut changed = prepare_import_preview(config)?;
+    let secrets = hydrate_proxy_secrets(config)?;
+    changed |= secrets;
+    Ok(changed)
+}
+
+/// Applies only the deterministic, in-memory part of import migration.
+///
+/// This is deliberately separate from [`migrate_import`]: a preview must not
+/// hydrate or persist proxy credentials in the platform secret store merely
+/// because a user opened the import confirmation dialog.
+pub fn prepare_import_preview(config: &mut AppConfig) -> Result<bool> {
+    let migrated = migrate_schema(config)?;
+    let normalized = normalize_legacy_capabilities(config);
+    let version_changed = config.version != env!("CARGO_PKG_VERSION");
+    if migrated || normalized || version_changed {
+        config.version = env!("CARGO_PKG_VERSION").to_string();
+    }
+    Ok(migrated || normalized || version_changed)
+}
+
+/// Moves an in-memory proxy password into the platform secret store and keeps
+/// only a stable reference in the serializable configuration. The password is
+/// intentionally retained in memory for the active data-plane session.
+pub fn persist_proxy_secret(proxy: &mut ProxyProfile) -> Result<bool> {
+    let Some(password) = proxy.password.as_deref() else {
+        return Ok(false);
+    };
+    let secret_ref = proxy
+        .password_ref
+        .clone()
+        .unwrap_or_else(|| proxyduck_common::SecretStore::proxy_password_ref(&proxy.id));
+    proxyduck_common::SecretStore::new()?.put(&secret_ref, password)?;
+    let changed = proxy.password_ref.as_deref() != Some(secret_ref.as_str());
+    proxy.password_ref = Some(secret_ref);
+    Ok(changed)
+}
+
+/// Hydrates password values for active use and migrates any legacy plaintext
+/// values found in an imported/old config. Missing secret files remain absent
+/// in memory so the proxy health layer can report the actual failure.
+pub fn hydrate_proxy_secrets(config: &mut AppConfig) -> Result<bool> {
+    let store = proxyduck_common::SecretStore::new()?;
+    let mut changed = false;
+    for proxy in &mut config.proxies {
+        if proxy.password.is_some() {
+            persist_proxy_secret_with_store(proxy, &store)?;
+            // Even when a legacy payload already supplied a reference, the
+            // plaintext password must be rewritten out of the JSON file.
+            changed = true;
+            continue;
+        }
+        if let Some(secret_ref) = proxy.password_ref.as_deref() {
+            match store.get(secret_ref)? {
+                Some(password) => proxy.password = Some(password),
+                None => tracing::warn!(proxy = %proxy.id, "proxy password secret is unavailable"),
+            }
+        }
+    }
+    Ok(changed)
+}
+
+fn persist_proxy_secret_with_store(
+    proxy: &mut ProxyProfile,
+    store: &proxyduck_common::SecretStore,
+) -> Result<()> {
+    let Some(password) = proxy.password.as_deref() else {
+        return Ok(());
+    };
+    let secret_ref = proxy
+        .password_ref
+        .clone()
+        .unwrap_or_else(|| proxyduck_common::SecretStore::proxy_password_ref(&proxy.id));
+    store.put(&secret_ref, password)?;
+    proxy.password_ref = Some(secret_ref);
+    Ok(())
 }
 
 fn parse_config(raw: &str, path: &Path) -> Result<AppConfig> {
@@ -88,10 +178,102 @@ fn migrate_schema(config: &mut AppConfig) -> Result<bool> {
                 config.schema_version = 3;
                 changed = true;
             }
+            3 => {
+                migrate_rule_policy_fields(config);
+                config.schema_version = 4;
+                changed = true;
+            }
+            4 => {
+                // Profiles are additive snapshots.  Older configurations do
+                // not need synthetic entries; serde defaults the new fields
+                // to an empty profile list and no active profile.
+                config.schema_version = 5;
+                changed = true;
+            }
+            5 => {
+                migrate_to_v6_debranding(config);
+                config.schema_version = 6;
+                changed = true;
+            }
             version => bail!("no migration path from configuration schema {version}"),
         }
     }
     Ok(changed)
+}
+
+fn migrate_to_v6_debranding(config: &mut AppConfig) {
+    let old_id = "clash-socks";
+    let new_id = "local-socks";
+
+    let has_old = config.proxies.iter().any(|p| p.id == old_id);
+    let has_new = config.proxies.iter().any(|p| p.id == new_id);
+
+    if has_old && !has_new {
+        for p in &mut config.proxies {
+            if p.id == old_id {
+                p.id = new_id.to_string();
+                if p.name == "Clash Verge" || p.name == "Clash SOCKS5" || p.name.contains("Clash") {
+                    p.name = "本地代理 (SOCKS5)".to_string();
+                }
+            }
+        }
+    }
+
+    let has_new_now = config.proxies.iter().any(|p| p.id == new_id);
+    let has_old_now = config.proxies.iter().any(|p| p.id == old_id);
+    if has_new_now && !has_old_now {
+        for rule in &mut config.rules {
+            if rule.proxy_profile == old_id {
+                rule.proxy_profile = new_id.to_string();
+            }
+            if let RouteAction::Proxy { ref mut proxy_id } = rule.action {
+                if proxy_id == old_id {
+                    *proxy_id = new_id.to_string();
+                }
+            }
+        }
+        for profile in &mut config.profiles {
+            for rule in &mut profile.rules {
+                if rule.proxy_profile == old_id {
+                    rule.proxy_profile = new_id.to_string();
+                }
+                if let RouteAction::Proxy { ref mut proxy_id } = rule.action {
+                    if proxy_id == old_id {
+                        *proxy_id = new_id.to_string();
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Materialize the policy fields introduced in schema 4 while retaining the
+/// legacy fields for one compatibility line. The old `dns` protocol flag was
+/// never an independent DNS data plane; the closest truthful migration is a
+/// plaintext-DNS block marker when the old firewall flag was enabled.
+fn migrate_rule_policy_fields(config: &mut AppConfig) {
+    let proxy_kinds = config
+        .proxies
+        .iter()
+        .map(|proxy| (proxy.id.as_str(), proxy.kind))
+        .collect::<std::collections::HashMap<_, _>>();
+
+    for rule in &mut config.rules {
+        if matches!(rule.action, RouteAction::Proxy { ref proxy_id } if proxy_id.is_empty()) {
+            rule.action = match proxy_kinds.get(rule.proxy_profile.as_str()) {
+                Some(ProxyKind::Direct) => RouteAction::Direct,
+                _ => RouteAction::Proxy {
+                    proxy_id: rule.proxy_profile.clone(),
+                },
+            };
+        }
+        if matches!(rule.dns.mode, DnsMode::Inherit)
+            && rule.force_dns
+            && rule.protocols.contains(&crate::model::Protocol::Dns)
+        {
+            rule.dns.mode = DnsMode::BlockPlaintext;
+        }
+    }
 }
 
 fn normalize_legacy_capabilities(config: &mut AppConfig) -> bool {
@@ -99,9 +281,9 @@ fn normalize_legacy_capabilities(config: &mut AppConfig) -> bool {
     if matches!(config.engine_mode, EngineMode::Wfp | EngineMode::ApiHook) {
         tracing::warn!(
             previous = ?config.engine_mode,
-            "configured engine is not implemented; falling back to WinDivert/ProxiFyre"
+            "configured engine is not implemented; falling back to ProxiFyre"
         );
-        config.engine_mode = EngineMode::WinDivert;
+        config.engine_mode = EngineMode::ProxiFyre;
         changed = true;
     }
 
@@ -165,9 +347,28 @@ fn write_config(path: &Path, config: &AppConfig, backup_existing: bool) -> Resul
                 backup.display()
             )
         })?;
+        proxyduck_common::harden_active_path(&backup).with_context(|| {
+            format!(
+                "failed to harden configuration backup: {}",
+                backup.display()
+            )
+        })?;
     }
     atomic_write(path, body.as_bytes())?;
 
+    Ok(())
+}
+
+fn write_sanitized_backup(path: &Path, config: &AppConfig) -> Result<()> {
+    let backup = backup_path(path);
+    let body = serde_json::to_string_pretty(config).context("failed to serialize config backup")?;
+    atomic_write(&backup, body.as_bytes())?;
+    proxyduck_common::harden_active_path(&backup).with_context(|| {
+        format!(
+            "failed to harden sanitized configuration backup: {}",
+            backup.display()
+        )
+    })?;
     Ok(())
 }
 
@@ -184,9 +385,26 @@ pub(crate) fn atomic_write(path: &Path, contents: &[u8]) -> Result<()> {
         .unwrap_or_else(|| "tmp".to_string());
     let mut tmp_path = path.to_path_buf();
     tmp_path.set_extension(extension);
-    fs::write(&tmp_path, contents)
-        .with_context(|| format!("failed to write temp file: {}", tmp_path.display()))?;
-    replace_file(&tmp_path, path)
+    if let Err(error) = fs::write(&tmp_path, contents)
+        .with_context(|| format!("failed to write temp file: {}", tmp_path.display()))
+    {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(error);
+    }
+    if let Err(error) = proxyduck_common::harden_active_path(&tmp_path) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(error).with_context(|| {
+            format!(
+                "failed to harden temp file before replace: {}",
+                tmp_path.display()
+            )
+        });
+    }
+    if let Err(error) = replace_file(&tmp_path, path) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(error);
+    }
+    Ok(())
 }
 
 fn backup_path(path: &Path) -> PathBuf {
@@ -312,7 +530,7 @@ mod tests {
         save(&path, &config).unwrap();
 
         let loaded = load_or_init(&path).unwrap();
-        assert_eq!(loaded.engine_mode, EngineMode::WinDivert);
+        assert_eq!(loaded.engine_mode, EngineMode::ProxiFyre);
         assert!(!loaded.proxies[0].enabled);
     }
 
@@ -339,6 +557,125 @@ mod tests {
         };
         save(&path, &future).unwrap();
         assert!(load_or_init(&path).is_err());
+    }
+
+    #[test]
+    fn schema_four_migration_materializes_action_and_truthful_dns_policy() {
+        let mut config = AppConfig {
+            schema_version: 3,
+            ..Default::default()
+        };
+        let mut rule = crate::model::Rule::new(
+            "legacy browser".to_string(),
+            crate::model::MatchCriteria {
+                app_names: vec!["browser.exe".to_string()],
+                ..Default::default()
+            },
+            "clash-socks".to_string(),
+        );
+        rule.action = RouteAction::default();
+        rule.dns.mode = DnsMode::Inherit;
+        rule.force_dns = true;
+        config.rules.push(rule);
+
+        assert!(migrate_schema(&mut config).unwrap());
+        assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
+        assert_eq!(
+            config.rules[0].action,
+            RouteAction::Proxy {
+                proxy_id: "local-socks".to_string()
+            }
+        );
+        assert_eq!(config.rules[0].dns.mode, DnsMode::BlockPlaintext);
+    }
+
+    #[test]
+    fn schema_five_to_six_migration_debrands_clash() {
+        let mut config = AppConfig {
+            schema_version: 5,
+            proxies: vec![ProxyProfile {
+                id: "clash-socks".to_string(),
+                name: "Clash Verge".to_string(),
+                kind: ProxyKind::Socks5,
+                endpoint: "127.0.0.1:7897".to_string(),
+                username: None,
+                password_ref: None,
+                password: None,
+                enabled: true,
+            }],
+            rules: vec![crate::model::Rule::new(
+                "browser".to_string(),
+                crate::model::MatchCriteria {
+                    app_names: vec!["browser.exe".to_string()],
+                    ..Default::default()
+                },
+                "clash-socks".to_string(),
+            )],
+            ..Default::default()
+        };
+
+        assert!(migrate_schema(&mut config).unwrap());
+        assert_eq!(config.schema_version, 6);
+        assert_eq!(config.proxies[0].id, "local-socks");
+        assert_eq!(config.proxies[0].name, "本地代理 (SOCKS5)");
+        assert_eq!(config.rules[0].proxy_profile, "local-socks");
+        assert_eq!(
+            config.rules[0].action,
+            RouteAction::Proxy {
+                proxy_id: "local-socks".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn import_normalizes_stale_product_version_without_other_migrations() {
+        let mut config = AppConfig {
+            version: "0.1.0".to_string(),
+            schema_version: CURRENT_SCHEMA_VERSION,
+            ..Default::default()
+        };
+
+        assert!(migrate_import(&mut config).unwrap());
+        assert_eq!(config.version, env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn load_rewrites_legacy_plaintext_password_even_with_existing_reference() {
+        let path = std::env::temp_dir()
+            .join(uuid::Uuid::new_v4().to_string())
+            .join("config.json5");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let proxy_id = format!("legacy-{}", uuid::Uuid::new_v4());
+        let mut config = AppConfig {
+            proxies: vec![ProxyProfile {
+                id: proxy_id.clone(),
+                name: "Legacy".into(),
+                kind: ProxyKind::Socks5,
+                endpoint: "127.0.0.1:1080".into(),
+                username: None,
+                password_ref: Some(proxyduck_common::SecretStore::proxy_password_ref(&proxy_id)),
+                password: None,
+                enabled: true,
+            }],
+            ..Default::default()
+        };
+        let mut raw = serde_json::to_value(&config).unwrap();
+        raw["proxies"][0]["password"] = serde_json::json!("legacy-plaintext");
+        std::fs::write(&path, serde_json::to_vec_pretty(&raw).unwrap()).unwrap();
+
+        config = load_or_init(&path).unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        let backup = std::fs::read_to_string(backup_path(&path)).unwrap();
+        assert!(!saved.contains("legacy-plaintext"));
+        assert!(!backup.contains("legacy-plaintext"));
+        assert_eq!(
+            config.proxies[0].password.as_deref(),
+            Some("legacy-plaintext")
+        );
+        proxyduck_common::SecretStore::new()
+            .unwrap()
+            .delete(config.proxies[0].password_ref.as_deref().unwrap())
+            .unwrap();
     }
 
     #[test]

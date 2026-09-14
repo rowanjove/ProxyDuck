@@ -14,6 +14,7 @@
   },
   "winpkfilter": {
     "version": "3.6.2.1",
+    "productCode": "{4EC4289E-7F4B-424C-8EA9-B7AC9850FFBE}",
     "tag": "v3.6.2",
     "commit": "417b8734e844083a10236387fba705d94a2d6bc9",
     "assetFile": "Windows.Packet.Filter.3.6.2.1.x64.msi",

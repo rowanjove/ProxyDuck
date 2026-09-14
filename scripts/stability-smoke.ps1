@@ -40,11 +40,15 @@ try {
   $readyDeadline = [DateTime]::UtcNow.AddSeconds(20)
   do {
     if ($process.HasExited) { throw "core exited during startup with code $($process.ExitCode)" }
-    & $cli --core-url $coreUrl --format json status *> $null
-    if ($LASTEXITCODE -eq 0) { break }
+    $previousErrorAction = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    & $cli --core-url $coreUrl --format json status 1>$null 2>$null
+    $probeExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousErrorAction
+    if ($probeExitCode -eq 0) { break }
     Start-Sleep -Milliseconds 250
   } while ([DateTime]::UtcNow -lt $readyDeadline)
-  if ($LASTEXITCODE -ne 0) { throw "core did not become ready within 20 seconds" }
+  if ($probeExitCode -ne 0) { throw "core did not become ready within 20 seconds" }
 
   while ([DateTime]::UtcNow -lt $deadline) {
     $checks += 1

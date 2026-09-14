@@ -20,7 +20,7 @@ test("English translations can be selected without changing application data", (
   assert.equal(t("settings.protection"), "Leak Protection");
   assert.equal(
     t("overview.summary", { rules: 1, proxies: 1, hits: 6, ruleLabel: t("overview.ruleSingular"), proxyLabel: t("overview.proxySingular") }),
-    "1 active rule · 1 proxy · 6 hits this session"
+    "1 active rule · 1 proxy · 6 process matches this session"
   );
   setLanguage("zh-CN");
 });

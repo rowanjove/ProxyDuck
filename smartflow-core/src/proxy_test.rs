@@ -12,7 +12,9 @@ const IO_TIMEOUT: Duration = Duration::from_millis(1500);
 pub fn test_proxy(profile: &ProxyProfile) -> ProxyTestResult {
     let started = Instant::now();
     let outcome = match profile.kind {
-        ProxyKind::Direct => Ok(Socks5Probe::default()),
+        ProxyKind::Direct => {
+            Err("direct route has no proxy endpoint or protocol to probe".to_string())
+        }
         ProxyKind::Socks5 => test_socks5(profile),
         kind => Err(format!(
             "proxy type '{kind:?}' is not supported by the active backend"
@@ -283,6 +285,7 @@ mod tests {
             kind: ProxyKind::Socks5,
             endpoint,
             username: None,
+            password_ref: None,
             password: None,
             enabled: true,
         });
@@ -305,7 +308,7 @@ mod tests {
             stream.write_all(b"HT").unwrap();
         });
 
-        let mut profile = ProxyProfile::clash_default();
+        let mut profile = ProxyProfile::local_socks_default();
         profile.endpoint = endpoint;
         let result = test_proxy(&profile);
         server.join().unwrap();
@@ -328,6 +331,7 @@ mod tests {
             kind: ProxyKind::Socks5,
             endpoint,
             username: Some("alice".to_string()),
+            password_ref: None,
             password: Some("s3crt".to_string()),
             enabled: true,
         });
@@ -347,7 +351,7 @@ mod tests {
             serve_no_auth_command(&listener, 0x01, 0x00);
         });
 
-        let mut profile = ProxyProfile::clash_default();
+        let mut profile = ProxyProfile::local_socks_default();
         profile.endpoint = endpoint;
         let result = test_proxy(&profile);
         server.join().unwrap();
@@ -356,5 +360,23 @@ mod tests {
         assert_eq!(result.udp_supported, Some(false));
         assert!(result.udp_error.unwrap().contains("status 0x07"));
         assert!(result.error.is_none());
+    }
+
+    #[test]
+    fn direct_route_is_not_reported_as_a_successful_proxy_probe() {
+        let mut profile = ProxyProfile::local_socks_default();
+        profile.kind = ProxyKind::Direct;
+        profile.endpoint.clear();
+
+        let result = test_proxy(&profile);
+
+        assert!(!result.reachable);
+        assert!(!result.protocol_accepted);
+        assert_eq!(result.tcp_supported, None);
+        assert_eq!(result.udp_supported, None);
+        assert_eq!(
+            result.error.as_deref(),
+            Some("direct route has no proxy endpoint or protocol to probe")
+        );
     }
 }

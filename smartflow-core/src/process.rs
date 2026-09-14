@@ -35,13 +35,17 @@ impl ProcessScanner {
             .system
             .processes()
             .iter()
-            .map(|(pid, process)| ProcessInfo {
-                pid: pid.as_u32(),
-                name: process.name().to_string_lossy().to_string(),
-                exe: process
-                    .exe()
-                    .map(|path| path.display().to_string())
-                    .unwrap_or_default(),
+            .map(|(pid, process)| {
+                let start_time = process.start_time();
+                ProcessInfo {
+                    pid: pid.as_u32(),
+                    creation_time: (start_time != 0).then_some(start_time),
+                    name: process.name().to_string_lossy().to_string(),
+                    exe: process
+                        .exe()
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_default(),
+                }
             })
             .collect();
 
@@ -69,6 +73,18 @@ pub fn launch_quick_bar_item(item: &QuickBarItem) -> Result<()> {
         StartMode::StartOnly | StartMode::StartAndBind => {}
     }
 
+    #[cfg(target_os = "windows")]
+    {
+        if std::env::var(proxyduck_common::SERVICE_SECRET_SCOPE_ENV)
+            .ok()
+            .is_some_and(|scope| scope.eq_ignore_ascii_case("machine"))
+        {
+            anyhow::bail!(
+                "launching desktop applications from the Windows Service (Session 0) is not supported; launch from the desktop client"
+            );
+        }
+    }
+
     if item.run_as_admin {
         launch_as_admin(item)
     } else {
@@ -90,22 +106,77 @@ fn launch_normal(item: &QuickBarItem) -> Result<()> {
     Ok(())
 }
 
+fn quote_powershell_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+/// Quotes one argv item using the Windows command-line convention used by
+/// `CommandLineToArgvW` and the MSVC runtime. `Start-Process` receives one
+/// command-line string, so this preserves spaces, quotes, and trailing
+/// backslashes without evaluating user input as PowerShell code.
+fn quote_windows_command_line_arg(value: &str) -> String {
+    if !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| !matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | b'"'))
+    {
+        return value.to_string();
+    }
+
+    let mut quoted = String::with_capacity(value.len() + 2);
+    quoted.push('"');
+    let mut backslashes = 0usize;
+    for character in value.chars() {
+        if character == '\\' {
+            backslashes += 1;
+            continue;
+        }
+        if character == '"' {
+            quoted.extend(std::iter::repeat_n('\\', backslashes * 2 + 1));
+            quoted.push('"');
+        } else {
+            quoted.extend(std::iter::repeat_n('\\', backslashes));
+            quoted.push(character);
+        }
+        backslashes = 0;
+    }
+    quoted.extend(std::iter::repeat_n('\\', backslashes * 2));
+    quoted.push('"');
+    quoted
+}
+
+fn build_admin_launch_script(item: &QuickBarItem, work_dir: &str) -> String {
+    let argument_list = item
+        .args
+        .iter()
+        .map(|value| quote_windows_command_line_arg(value))
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        "$argumentList = {arguments}; $process = Start-Process -FilePath {file} -ArgumentList $argumentList -WorkingDirectory {dir} -Verb RunAs -PassThru; if ($null -eq $process) {{ exit 1 }}",
+        arguments = quote_powershell_literal(&argument_list),
+        file = quote_powershell_literal(&item.exe_path),
+        dir = quote_powershell_literal(work_dir),
+    )
+}
+
 fn launch_as_admin(item: &QuickBarItem) -> Result<()> {
     if cfg!(windows) {
-        let args = item.args.join(" ");
         let work_dir = item.work_dir.clone().unwrap_or_else(|| ".".to_string());
 
-        let escaped_file = item.exe_path.replace("'", "''");
-        let escaped_args = args.replace("'", "''");
-        let escaped_dir = work_dir.replace("'", "''");
+        // Do not rely on PATH resolution for an elevation boundary, and do
+        // not flatten the argument vector without Windows command-line
+        // quoting. Start-Process ultimately passes one command-line string;
+        // the helper above preserves argv boundaries for spaces and quotes.
+        let powershell = std::env::var_os("SystemRoot")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from(r"C:\Windows"))
+            .join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
+        let script = build_admin_launch_script(item, &work_dir);
 
-        let script = format!(
-            "Start-Process -FilePath '{}' -ArgumentList '{}' -WorkingDirectory '{}' -Verb RunAs",
-            escaped_file, escaped_args, escaped_dir
-        );
-
-        let status = Command::new("powershell")
+        let status = Command::new(powershell)
             .arg("-NoProfile")
+            .arg("-NonInteractive")
             .arg("-Command")
             .arg(script)
             .status()
@@ -138,7 +209,13 @@ pub fn resolve_matching_rule<'a>(
         };
 
         let replace = match &best {
-            Some(current) => match_kind < current.match_kind,
+            Some(current) => {
+                if rule.priority != current.rule.priority {
+                    rule.priority > current.rule.priority
+                } else {
+                    match_kind < current.match_kind
+                }
+            }
             None => true,
         };
 
@@ -158,7 +235,13 @@ pub fn evaluate_rules(rules: &[Rule], process: &ProcessInfo) -> RuleEvaluation {
             rule_match_kind(rule, process).map(|match_kind| (index, rule, match_kind))
         })
         .collect::<Vec<_>>();
-    matches.sort_by_key(|(index, _, match_kind)| (*match_kind, *index));
+    matches.sort_by(|(index_a, rule_a, match_a), (index_b, rule_b, match_b)| {
+        rule_b
+            .priority
+            .cmp(&rule_a.priority)
+            .then_with(|| match_a.cmp(match_b))
+            .then_with(|| index_a.cmp(index_b))
+    });
 
     RuleEvaluation {
         process: process.clone(),
@@ -168,7 +251,7 @@ pub fn evaluate_rules(rules: &[Rule], process: &ProcessInfo) -> RuleEvaluation {
             .map(|(index, (_, rule, match_kind))| RuleEvaluationMatch {
                 rule_id: rule.id.clone(),
                 rule_name: rule.name.clone(),
-                proxy_id: rule.proxy_profile.clone(),
+                proxy_id: rule.action_target_id(),
                 match_kind,
                 selected: index == 0,
             })
@@ -254,7 +337,12 @@ pub fn rule_match_kind(rule: &Rule, process: &ProcessInfo) -> Option<MatchKind> 
     let lower_name = process.name.trim().to_ascii_lowercase();
     let lower_exe = normalize_executable_path(&process.exe);
 
-    if rule.matcher.pids.contains(&process.pid) {
+    if rule.matcher.pids.contains(&process.pid)
+        && rule
+            .matcher
+            .pid_creation_time
+            .is_some_and(|expected| process.creation_time == Some(expected))
+    {
         return Some(MatchKind::Pid);
     }
 
@@ -342,6 +430,24 @@ mod tests {
     use crate::model::MatchCriteria;
 
     #[test]
+    fn admin_launch_script_preserves_argument_boundaries_and_quotes() {
+        let mut item = QuickBarItem::new(
+            "quoted".to_string(),
+            r"C:\Program Files\Proxy Duck\proxy.exe".to_string(),
+            "proxy".to_string(),
+        );
+        item.args = vec!["--label".to_string(), "a b".to_string(), "o'ne".to_string()];
+        item.work_dir = Some(r"C:\Program Files\Proxy Duck".to_string());
+        let script = build_admin_launch_script(&item, item.work_dir.as_deref().unwrap());
+        assert!(script.contains("$argumentList = '--label \"a b\" o''ne'"));
+        assert!(script.contains("-FilePath 'C:\\Program Files\\Proxy Duck\\proxy.exe'"));
+        assert!(!script.contains("$argumentList = '--label a b o''ne'"));
+        assert_eq!(quote_windows_command_line_arg("a b"), "\"a b\"");
+        assert_eq!(quote_windows_command_line_arg(r"C:\path\\"), "C:\\path\\\\");
+        assert_eq!(quote_windows_command_line_arg("a\"b"), "\"a\\\"b\"");
+    }
+
+    #[test]
     fn test_rule_matches_process() {
         let matcher = MatchCriteria {
             app_names: vec!["node.exe".to_string()],
@@ -352,6 +458,7 @@ mod tests {
 
         let p1 = ProcessInfo {
             pid: 100,
+            creation_time: Some(1000),
             name: "node.exe".to_string(),
             exe: "C:\\Program Files\\nodejs\\node.exe".to_string(),
         };
@@ -359,6 +466,7 @@ mod tests {
 
         let p2 = ProcessInfo {
             pid: 101,
+            creation_time: None,
             name: "NoDe.ExE".to_string(),
             exe: "C:\\node.exe".to_string(),
         };
@@ -366,6 +474,7 @@ mod tests {
 
         let p3 = ProcessInfo {
             pid: 102,
+            creation_time: None,
             name: "python.exe".to_string(),
             exe: "C:\\python.exe".to_string(),
         };
@@ -385,6 +494,7 @@ mod tests {
 
         rule.matcher.wildcard = None;
         rule.matcher.pids = vec![100];
+        rule.matcher.pid_creation_time = Some(1000);
         assert!(rule_matches_process(&rule, &p1));
         assert!(!rule_matches_process(&rule, &p2));
     }
@@ -393,6 +503,7 @@ mod tests {
     fn pid_match_has_higher_priority_than_name_match() {
         let process = ProcessInfo {
             pid: 42,
+            creation_time: Some(1000),
             name: "node.exe".to_string(),
             exe: "C:\\Program Files\\nodejs\\node.exe".to_string(),
         };
@@ -410,6 +521,7 @@ mod tests {
             "pid".to_string(),
             MatchCriteria {
                 pids: vec![42],
+                pid_creation_time: Some(1000),
                 ..Default::default()
             },
             "proxy-b".to_string(),
@@ -422,9 +534,51 @@ mod tests {
     }
 
     #[test]
+    fn legacy_pid_without_creation_time_does_not_match_a_reused_process() {
+        let rule = Rule::new(
+            "legacy pid".to_string(),
+            MatchCriteria {
+                pids: vec![42],
+                ..Default::default()
+            },
+            "proxy".to_string(),
+        );
+        let process = ProcessInfo {
+            pid: 42,
+            creation_time: Some(2000),
+            name: "reused.exe".to_string(),
+            exe: "C:\\Apps\\reused.exe".to_string(),
+        };
+
+        assert_eq!(rule_match_kind(&rule, &process), None);
+    }
+
+    #[test]
+    fn pid_creation_time_mismatch_does_not_match_the_reused_process() {
+        let rule = Rule::new(
+            "bound pid".to_string(),
+            MatchCriteria {
+                pids: vec![42],
+                pid_creation_time: Some(1000),
+                ..Default::default()
+            },
+            "proxy".to_string(),
+        );
+        let process = ProcessInfo {
+            pid: 42,
+            creation_time: Some(2000),
+            name: "reused.exe".to_string(),
+            exe: "C:\\Apps\\reused.exe".to_string(),
+        };
+
+        assert_eq!(rule_match_kind(&rule, &process), None);
+    }
+
+    #[test]
     fn evaluation_explains_the_full_match_chain() {
         let process = ProcessInfo {
             pid: 42,
+            creation_time: Some(1000),
             name: "node.exe".to_string(),
             exe: "C:\\Node\\node.exe".to_string(),
         };
@@ -440,6 +594,7 @@ mod tests {
             "pid".to_string(),
             MatchCriteria {
                 pids: vec![42],
+                pid_creation_time: Some(1000),
                 ..Default::default()
             },
             "b".to_string(),
@@ -477,6 +632,7 @@ mod tests {
     fn path_and_name_matchers_are_exact_and_case_insensitive() {
         let process = ProcessInfo {
             pid: 7,
+            creation_time: None,
             name: "Code.EXE".to_string(),
             exe: "C:\\Apps\\Code.exe".to_string(),
         };
@@ -507,6 +663,7 @@ mod tests {
     fn wildcard_matcher_uses_anchored_glob_semantics() {
         let process = ProcessInfo {
             pid: 7,
+            creation_time: None,
             name: "code.exe".to_string(),
             exe: "C:\\Apps\\code.exe".to_string(),
         };

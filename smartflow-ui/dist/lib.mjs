@@ -28,9 +28,10 @@ export function formatTime(value, includeDate = false) {
 
 export function engineLabel(mode) {
   return ({
-    win_divert: "WinDivert",
+    proxifyre: "ProxiFyre",
+    win_divert: "ProxiFyre",
+    windivert: "ProxiFyre",
     sing_box: "sing-box TUN",
-    windivert: "WinDivert",
     wfp: "WFP",
     api_hook: "API Hook"
   })[mode] || mode || "—";
@@ -82,7 +83,7 @@ export function fileName(path) {
 }
 
 export function totalHits(stats = {}) {
-  return Object.values(stats.processHits || {}).reduce((total, value) => total + (Number(value) || 0), 0);
+  return Object.values(stats.processMatches || stats.processHits || {}).reduce((total, value) => total + (Number(value) || 0), 0);
 }
 
 export function protectionSummary(runtime = {}) {
@@ -100,8 +101,19 @@ export function validateEndpoint(kind, endpoint) {
 }
 
 export function normalizeError(error) {
-  const message = error instanceof Error ? error.message : String(error || "未知错误");
-  if (message.includes("Failed to fetch") || message.includes("fetch failed")) return "无法连接本地核心服务";
-  if (message.includes("401") || message.toLowerCase().includes("token")) return "核心服务鉴权失败，请重启应用";
-  return message;
+  const rawMessage = error instanceof Error ? error.message : String(error || "未知错误");
+  const message = rawMessage.includes("Failed to fetch") || rawMessage.includes("fetch failed")
+    ? "无法连接本地核心服务"
+    : rawMessage.includes("401") || rawMessage.toLowerCase().includes("token")
+      ? "核心服务鉴权失败，请重启应用"
+      : rawMessage;
+  const diagnostics = Array.isArray(error?.diagnostics) ? error.diagnostics : [];
+  if (!diagnostics.length) return message;
+  const details = diagnostics.slice(0, 3).map((item) => {
+    const code = item?.code || "diagnostic";
+    const explanation = item?.message || item?.effective || item?.remediation || "";
+    return explanation ? `${code}: ${explanation}` : code;
+  }).join(" · ");
+  const suffix = diagnostics.length > 3 ? ` · +${diagnostics.length - 3}` : "";
+  return `${message} · ${details}${suffix}`;
 }

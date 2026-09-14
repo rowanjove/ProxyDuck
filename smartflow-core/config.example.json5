@@ -1,7 +1,7 @@
 ﻿{
   version: "1.0.0",
-  schemaVersion: 3,
-  engineMode: "win_divert",
+  schemaVersion: 5,
+  engineMode: "proxifyre",
   proxies: [
     {
       id: "clash-socks",
@@ -25,6 +25,9 @@
         hashes: [],
         wildcard: null
       },
+      action: { type: "proxy", proxyId: "clash-socks" },
+      network: { tcp: "proxy", udp: "proxy", ipv4: "proxy", ipv6: "proxy" },
+      dns: { mode: "block_plaintext" },
       proxyProfile: "clash-socks",
       protocols: ["tcp", "udp", "dns"],
       autoBindChildren: false,
@@ -55,5 +58,7 @@
     dohBlocked: true,
     leakProtectionMode: "availability",
     logLevel: "info"
-  }
+  },
+  profiles: [],
+  activeProfileId: null
 }

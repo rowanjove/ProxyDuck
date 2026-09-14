@@ -2,6 +2,7 @@
 members = [
   "proxyduck-common",
   "smartflow-core",
+  "proxyduck-service",
   "smartflow-cli",
   "smartflow-ui/src-tauri"
 ]

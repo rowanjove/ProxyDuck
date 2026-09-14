@@ -1,24 +1,55 @@
 mod api_hook;
+mod job;
 mod proxifyre;
+mod proxifyre_engine;
 mod sing_box;
 mod wfp;
-mod windivert;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+
+static MOCK_DATA_PLANE: AtomicBool = AtomicBool::new(false);
+
+pub fn is_mock_data_plane() -> bool {
+    if MOCK_DATA_PLANE.load(Ordering::Relaxed) {
+        return true;
+    }
+    if cfg!(test) {
+        return true;
+    }
+    if std::env::var("PROXYDUCK_MOCK_DATA_PLANE")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        let exe_lossy = exe.to_string_lossy().to_ascii_lowercase();
+        if exe_lossy.contains("deps\\proxyduck_") || exe_lossy.contains("deps/proxyduck_") {
+            return true;
+        }
+    }
+    false
+}
+
+pub fn set_mock_data_plane(enabled: bool) {
+    MOCK_DATA_PLANE.store(enabled, Ordering::Relaxed);
+}
 
 use anyhow::{anyhow, Result};
 use chrono::Utc;
 use parking_lot::RwLock;
 
 use crate::model::{
-    AppConfig, DataPlanePhase, DataPlaneStatus, EngineCapability, EngineMode, Protocol, ProxyKind,
-    RuntimeStats,
+    AppConfig, DataPlanePhase, DataPlaneStatus, EngineCapability, EngineMode, ProcessInfo,
+    Protocol, ProxyKind, RuntimeStats,
 };
 
 pub use api_hook::ApiHookEngine;
+pub use job::ProcessJobGuard;
+pub use proxifyre_engine::ProxiFyreEngine;
 pub use sing_box::SingBoxEngine;
 pub use wfp::WfpEngine;
-pub use windivert::WinDivertEngine;
 
 pub trait DataPlaneBackend: Send + Sync {
     fn start(&self, config: &AppConfig) -> Result<()>;
@@ -26,6 +57,9 @@ pub trait DataPlaneBackend: Send + Sync {
     fn reload(&self, config: &AppConfig) -> Result<()>;
     fn status(&self) -> DataPlaneStatus;
     fn maintain(&self, config: &AppConfig) -> Result<bool>;
+    fn reconcile_processes(&self, _config: &AppConfig, _processes: &[ProcessInfo]) -> Result<bool> {
+        Ok(false)
+    }
 }
 
 pub trait ProxyEngine: Send + Sync {
@@ -35,6 +69,9 @@ pub trait ProxyEngine: Send + Sync {
     fn reload_rules(&self, config: &AppConfig) -> Result<()>;
     fn status(&self) -> DataPlaneStatus;
     fn maintain(&self, config: &AppConfig) -> Result<bool>;
+    fn reconcile_processes(&self, _config: &AppConfig, _processes: &[ProcessInfo]) -> Result<bool> {
+        Ok(false)
+    }
 }
 
 pub struct EngineManager {
@@ -106,8 +143,25 @@ impl EngineManager {
         result
     }
 
-    pub fn switch_mode(&self, mode: EngineMode, config: &AppConfig) -> Result<()> {
-        let result = self.switch_mode_inner(mode, config);
+    pub fn reconcile_processes(
+        &self,
+        config: &AppConfig,
+        processes: &[ProcessInfo],
+    ) -> Result<bool> {
+        let result = self.active.read().reconcile_processes(config, processes);
+        if let Err(error) = &result {
+            *self.startup_error.write() = Some(error.to_string());
+        }
+        result
+    }
+
+    pub fn switch_mode(
+        &self,
+        mode: EngineMode,
+        config: &AppConfig,
+        rollback_config: &AppConfig,
+    ) -> Result<()> {
+        let result = self.switch_mode_inner(mode, config, rollback_config);
         match &result {
             Ok(()) => *self.startup_error.write() = None,
             Err(error) => *self.startup_error.write() = Some(error.to_string()),
@@ -115,7 +169,12 @@ impl EngineManager {
         result
     }
 
-    fn switch_mode_inner(&self, mode: EngineMode, config: &AppConfig) -> Result<()> {
+    fn switch_mode_inner(
+        &self,
+        mode: EngineMode,
+        config: &AppConfig,
+        rollback_config: &AppConfig,
+    ) -> Result<()> {
         let capability = capability_for(mode);
         if !capability.available {
             return Err(anyhow!(
@@ -137,7 +196,7 @@ impl EngineManager {
 
         let next = create_engine(mode);
         if let Err(error) = next.start(config) {
-            let rollback = active.start(config);
+            let rollback = active.start(rollback_config);
             return match rollback {
                 Ok(()) => Err(error),
                 Err(rollback_error) => Err(anyhow!(
@@ -157,16 +216,19 @@ impl EngineManager {
 pub fn engine_capabilities() -> Vec<EngineCapability> {
     vec![
         EngineCapability {
-            mode: EngineMode::WinDivert,
-            display_name: "WinDivert (ProxiFyre)".to_string(),
+            mode: EngineMode::ProxiFyre,
+            display_name: "ProxiFyre".to_string(),
             backend_name: "proxifyre".to_string(),
             available: true,
             unavailable_reason: None,
             supported_proxy_kinds: vec![ProxyKind::Socks5, ProxyKind::Direct],
-            supported_protocols: vec![Protocol::Tcp, Protocol::Udp, Protocol::Dns],
+            supported_protocols: vec![Protocol::Tcp, Protocol::Udp],
             supports_child_inheritance: false,
             supports_hash_matching: false,
             supports_firewall_hardening: true,
+            supports_destination_matching: false,
+            supports_dns_policy: false,
+            supports_dynamic_tun: false,
         },
         EngineCapability {
             mode: EngineMode::SingBox,
@@ -177,10 +239,13 @@ pub fn engine_capabilities() -> Vec<EngineCapability> {
                 "sing-box.exe was not found; set PROXYDUCK_SING_BOX_PATH or bundle it next to ProxyDuck".to_string()
             }),
             supported_proxy_kinds: vec![ProxyKind::Socks5, ProxyKind::Direct],
-            supported_protocols: vec![Protocol::Tcp, Protocol::Udp, Protocol::Dns],
+            supported_protocols: vec![Protocol::Tcp, Protocol::Udp],
             supports_child_inheritance: false,
             supports_hash_matching: false,
             supports_firewall_hardening: false,
+            supports_destination_matching: true,
+            supports_dns_policy: false,
+            supports_dynamic_tun: true,
         },
         EngineCapability {
             mode: EngineMode::Wfp,
@@ -196,6 +261,9 @@ pub fn engine_capabilities() -> Vec<EngineCapability> {
             supports_child_inheritance: false,
             supports_hash_matching: false,
             supports_firewall_hardening: false,
+            supports_destination_matching: false,
+            supports_dns_policy: false,
+            supports_dynamic_tun: false,
         },
         EngineCapability {
             mode: EngineMode::ApiHook,
@@ -210,6 +278,9 @@ pub fn engine_capabilities() -> Vec<EngineCapability> {
             supports_child_inheritance: false,
             supports_hash_matching: false,
             supports_firewall_hardening: false,
+            supports_destination_matching: false,
+            supports_dns_policy: false,
+            supports_dynamic_tun: false,
         },
     ]
 }
@@ -223,7 +294,7 @@ pub fn capability_for(mode: EngineMode) -> EngineCapability {
 
 fn create_engine(mode: EngineMode) -> Box<dyn ProxyEngine> {
     match mode {
-        EngineMode::WinDivert => Box::new(WinDivertEngine::default()),
+        EngineMode::ProxiFyre => Box::new(ProxiFyreEngine::default()),
         EngineMode::SingBox => Box::new(SingBoxEngine::default()),
         EngineMode::Wfp => Box::new(WfpEngine::default()),
         EngineMode::ApiHook => Box::new(ApiHookEngine::default()),
@@ -232,7 +303,7 @@ fn create_engine(mode: EngineMode) -> Box<dyn ProxyEngine> {
 
 pub fn mode_name(mode: EngineMode) -> String {
     match mode {
-        EngineMode::WinDivert => "windivert",
+        EngineMode::ProxiFyre => "proxifyre",
         EngineMode::SingBox => "sing_box",
         EngineMode::Wfp => "wfp",
         EngineMode::ApiHook => "api_hook",
@@ -240,39 +311,57 @@ pub fn mode_name(mode: EngineMode) -> String {
     .to_string()
 }
 
-pub fn validate_clash_profile(config: &AppConfig) -> Result<()> {
+pub fn validate_endpoint_profiles(config: &AppConfig) -> Result<()> {
+    let requires_proxy = config
+        .rules
+        .iter()
+        .any(|rule| rule.enabled && matches!(rule.action, crate::model::RouteAction::Proxy { .. }));
     let has_enabled = config.proxies.iter().any(|proxy| proxy.enabled);
-    if !has_enabled {
+    if requires_proxy && !has_enabled {
         return Err(anyhow!("no enabled proxy profiles found"));
     }
     Ok(())
 }
 
+pub use validate_endpoint_profiles as validate_clash_profile;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{MatchCriteria, Rule};
 
     #[test]
     fn capability_registry_is_complete_and_honest() {
         let capabilities = engine_capabilities();
         assert_eq!(capabilities.len(), 4);
-        assert!(capability_for(EngineMode::WinDivert).available);
+        assert!(capability_for(EngineMode::ProxiFyre).available);
         assert_eq!(capability_for(EngineMode::SingBox).backend_name, "sing-box");
         assert!(!capability_for(EngineMode::Wfp).available);
         assert!(!capability_for(EngineMode::ApiHook).available);
         assert_eq!(
-            capability_for(EngineMode::WinDivert).supported_proxy_kinds,
+            capability_for(EngineMode::ProxiFyre).supported_proxy_kinds,
             vec![ProxyKind::Socks5, ProxyKind::Direct]
         );
+        assert!(!capability_for(EngineMode::ProxiFyre).supports_destination_matching);
+        assert!(capability_for(EngineMode::SingBox).supports_destination_matching);
+        assert!(capability_for(EngineMode::SingBox).supports_dynamic_tun);
     }
 
     #[test]
     fn failed_start_is_exposed_as_an_error_status() {
         let stats = Arc::new(RwLock::new(RuntimeStats::default()));
-        let manager = EngineManager::new(EngineMode::WinDivert, stats);
+        let manager = EngineManager::new(EngineMode::ProxiFyre, stats);
         let mut config = AppConfig::default();
         config.runtime.enabled = true;
         config.proxies[0].enabled = false;
+        config.rules.push(Rule::new(
+            "requires proxy".into(),
+            MatchCriteria {
+                app_names: vec!["browser.exe".into()],
+                ..Default::default()
+            },
+            "local-socks".into(),
+        ));
 
         assert!(manager.start(&config).is_err());
         let status = manager.status();

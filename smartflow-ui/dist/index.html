@@ -27,6 +27,10 @@
       <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></symbol>
       <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z"/></symbol>
       <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M14 7l5 5-5 5"/></symbol>
+      <symbol id="i-doctor" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+      <symbol id="i-studio" viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></symbol>
+      <symbol id="i-history" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 15"/></symbol>
+      <symbol id="i-snapshot" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></symbol>
     </svg>
 
     <div class="app-shell">
@@ -38,9 +42,13 @@
 
         <nav class="nav nav-primary" aria-label="主导航">
           <button class="nav-item active" data-view="overview"><svg><use href="#i-grid"/></svg><span data-i18n="nav.overview">概览</span></button>
-          <button class="nav-item" data-view="rules"><svg><use href="#i-route"/></svg><span data-i18n="nav.rules">规则</span><b id="navRuleCount">0</b></button>
-          <button class="nav-item" data-view="proxies"><svg><use href="#i-server"/></svg><span data-i18n="nav.proxies">代理</span></button>
-          <button class="nav-item" data-view="processes"><svg><use href="#i-process"/></svg><span data-i18n="nav.processes">进程</span></button>
+          <button class="nav-item" data-view="rules"><svg><use href="#i-route"/></svg><span data-i18n="nav.rules">应用路由</span><b id="navRuleCount">0</b></button>
+          <button class="nav-item" data-view="doctor"><svg><use href="#i-doctor"/></svg><span data-i18n="nav.doctor">网络急救</span></button>
+          <button class="nav-item" data-view="studio"><svg><use href="#i-studio"/></svg><span data-i18n="nav.studio">配置工作台</span></button>
+          <button class="nav-item" data-view="history"><svg><use href="#i-history"/></svg><span data-i18n="nav.history">诊断记录</span></button>
+          <button class="nav-item" data-view="profiles"><svg><use href="#i-folder"/></svg><span data-i18n="nav.profiles">配置方案</span></button>
+          <button class="nav-item" data-view="proxies"><svg><use href="#i-server"/></svg><span data-i18n="nav.proxies">代理端点</span></button>
+          <button class="nav-item" data-view="processes"><svg><use href="#i-process"/></svg><span data-i18n="nav.processes">在线进程</span></button>
         </nav>
 
         <div class="sidebar-spacer"></div>
@@ -94,19 +102,27 @@
                 <button class="button primary" data-open-modal="rule"><svg><use href="#i-plus"/></svg><span data-i18n="common.addRule">添加规则</span></button>
               </header>
               <div class="data-table">
-                <div class="data-list data-header overview-rule-columns"><span data-i18n="table.application">应用</span><span data-i18n="table.proxy">代理</span><span data-i18n="table.status">状态</span><span data-i18n="table.lastHit">最近命中</span></div>
+                <div class="data-list data-header overview-rule-columns"><span data-i18n="table.application">应用</span><span data-i18n="table.proxy">代理</span><span data-i18n="table.status">状态</span><span data-i18n="table.lastHit">最近匹配</span></div>
                 <div id="overviewRuleList"><div class="loading-state"><span></span><span data-i18n="loading.rules">正在加载规则…</span></div></div>
               </div>
             </section>
 
             <section class="desktop-section">
               <header class="section-header">
-                <div><h2 data-i18n="overview.recentActivity">最近活动</h2><p data-i18n="overview.recentActivityDescription">最近命中规则的进程</p></div>
+                <div><h2 data-i18n="overview.recentActivity">最近活动</h2><p data-i18n="overview.recentActivityDescription">最近匹配规则的进程</p></div>
+                <div class="header-tab-group">
+                  <button class="tab-btn active" id="overviewActivityTab" data-i18n="overview.tabRecent">历史匹配</button>
+                  <button class="tab-btn" id="overviewConnectionsTab" data-i18n="overview.tabLive">实时连接</button>
+                </div>
                 <button class="text-button" data-open-modal="activity"><span data-i18n="overview.viewAll">查看全部</span><svg><use href="#i-arrow"/></svg></button>
               </header>
-              <div class="data-table">
+              <div class="data-table" id="recentActivityTable">
                 <div class="data-list data-header activity-columns"><span data-i18n="table.time">时间</span><span data-i18n="table.process">进程</span><span data-i18n="table.route">路由</span><span data-i18n="table.result">结果</span></div>
                 <div class="activity-list" id="recentActivity"><div class="loading-state"><span></span><span data-i18n="loading.activity">正在加载活动…</span></div></div>
+              </div>
+              <div class="data-table hidden" id="liveConnectionsTable">
+                <div class="data-list data-header live-connection-columns"><span data-i18n="table.time">时间</span><span data-i18n="table.process">进程</span><span data-i18n="table.target">匹配目标</span><span data-i18n="table.route">路由</span><span></span></div>
+                <div class="activity-list" id="liveConnectionsList"><div class="loading-state"><span></span><span data-i18n="loading.activity">正在加载活动…</span></div></div>
               </div>
             </section>
           </section>
@@ -115,7 +131,11 @@
             <div class="section-toolbar">
               <div class="search-box"><svg><use href="#i-search"/></svg><input id="ruleSearch" placeholder="搜索规则、进程或代理" data-i18n-placeholder="rules.search" /></div>
               <div class="toolbar-actions">
-                <button class="button ghost" id="applyTemplateBtn" data-i18n="rules.template">导入 AI 开发预设</button>
+                <label class="inline-select"><span class="sr-only" data-i18n="rules.templateLabel">规则模板</span><select id="templateSelect"><option value="ai-dev" data-i18n="rules.templateAiDev">AI 开发</option><option value="browser" data-i18n="rules.templateBrowser">浏览器</option><option value="gaming" data-i18n="rules.templateGaming">游戏平台</option><option value="meetings" data-i18n="rules.templateMeetings">会议与沟通</option></select></label>
+                <button class="button ghost" id="applyTemplateBtn" data-i18n="rules.template">导入预设</button>
+                <button class="button ghost" id="openSimulatorBtn" data-open-modal="simulator"><svg><use href="#i-route"/></svg><span data-i18n="rules.simulator">策略仿真</span></button>
+                <button class="button ghost" id="ruleBatchEnableBtn" data-i18n="rules.batchEnable">启用选中</button>
+                <button class="button ghost" id="ruleBatchDisableBtn" data-i18n="rules.batchDisable">停用选中</button>
                 <button class="button primary" data-open-modal="rule"><svg><use href="#i-plus"/></svg><span data-i18n="rules.create">新建规则</span></button>
               </div>
             </div>
@@ -125,10 +145,156 @@
             </div>
           </section>
 
+          <section class="view" id="view-doctor">
+            <div class="section-toolbar">
+              <p class="section-lead" data-i18n="doctor.lead">10 层系统化网络与代理体检、根因分析与一键急救</p>
+              <div class="toolbar-actions">
+                <button class="button ghost" id="createSnapshotBtn"><svg><use href="#i-snapshot"/></svg><span data-i18n="doctor.createSnapshot">创建快照</span></button>
+                <button class="button primary" id="runDiagnoseBtn"><svg><use href="#i-pulse"/></svg><span data-i18n="doctor.runDiagnose">开始全面体检</span></button>
+                <button class="button primary hidden" id="runRepairBtn"><svg><use href="#i-check"/></svg><span data-i18n="doctor.runRepair">一键智能急救</span></button>
+              </div>
+            </div>
+
+            <div class="desktop-section" id="doctorOverallSection">
+              <div class="doctor-status-banner" id="doctorOverallBanner">
+                <div class="banner-status-icon"><svg><use href="#i-pulse"/></svg></div>
+                <div class="banner-status-info">
+                  <h2 id="doctorOverallTitle">网络就绪</h2>
+                  <p id="doctorOverallSubtitle">点击“开始全面体检”扫描 10 层网络链路及代理健康状态</p>
+                </div>
+                <div class="banner-status-meta" id="doctorOverallMeta"></div>
+              </div>
+            </div>
+
+            <section class="desktop-section">
+              <header class="section-header">
+                <div><h2 data-i18n="doctor.layersTitle">10 层网络链路全景</h2><p>按物理层、传输层、协议层至系统代理逐级检测</p></div>
+              </header>
+              <div class="layers-grid" id="doctorLayersGrid"></div>
+            </section>
+
+            <section class="desktop-section" id="doctorIssuesSection">
+              <header class="section-header">
+                <div><h2 data-i18n="doctor.issuesTitle">检测到的网络异常与隐患</h2><p>系统自动推断的根因与置信度</p></div>
+              </header>
+              <div class="data-table">
+                <div id="doctorIssuesList"></div>
+              </div>
+            </section>
+
+            <section class="desktop-section hidden" id="doctorRepairSection">
+              <header class="section-header">
+                <div><h2 data-i18n="doctor.repairPlanTitle">智能修复建议计划</h2><p>执行前会自动创建网络快照，支持秒级一键回滚</p></div>
+              </header>
+              <div class="repair-plan-card" id="doctorRepairCard">
+                <div id="doctorRepairPlanList"></div>
+              </div>
+            </section>
+
+            <section class="desktop-section">
+              <header class="section-header">
+                <div><h2 data-i18n="doctor.snapshotsTitle">网络环境快照</h2><p data-i18n="doctor.snapshotsDesc">每次急救前自动拍摄快照，支持秒级一键回滚</p></div>
+                <button class="button ghost small" id="refreshSnapshotsBtn"><svg><use href="#i-refresh"/></svg><span data-i18n="common.refresh">刷新</span></button>
+              </header>
+              <div class="data-table">
+                <div class="data-list data-header snapshot-columns"><span>创建时间</span><span>触发原因</span><span>代理状态</span><span>Hosts 条数</span><span>操作</span></div>
+                <div id="doctorSnapshotList"></div>
+              </div>
+            </section>
+          </section>
+
+          <section class="view" id="view-studio">
+            <div class="section-toolbar">
+              <p class="section-lead" data-i18n="studio.lead">多客户端代理配置集中发现、非破坏性编辑与端口冲突校验</p>
+              <div class="toolbar-actions">
+                <button class="button ghost" id="scanConfigsBtn"><svg><use href="#i-search"/></svg><span data-i18n="studio.scan">扫描本地配置</span></button>
+                <button class="button ghost" id="validateConfigBtn"><svg><use href="#i-check"/></svg><span data-i18n="studio.validate">语法与端口校验</span></button>
+                <button class="button primary" id="saveConfigBtn"><svg><use href="#i-check"/></svg><span data-i18n="studio.save">安全保存</span></button>
+              </div>
+            </div>
+
+            <div class="studio-layout">
+              <div class="studio-sidebar desktop-section">
+                <header class="section-header">
+                  <div><h2 data-i18n="studio.discoveredTitle">发现的代理配置</h2></div>
+                </header>
+                <div class="discovered-config-list" id="discoveredConfigList"></div>
+              </div>
+
+              <div class="studio-workbench desktop-section" id="studioWorkbench">
+                <div class="workbench-header" id="studioHeader">
+                  <div class="workbench-file-info">
+                    <span class="file-path-badge" id="studioFilePath">请选择配置文件</span>
+                    <small id="studioFileMeta"></small>
+                  </div>
+                  <div class="workbench-tabs">
+                    <button class="tab-btn active" data-studio-tab="visual" data-i18n="studio.tabVisual">可视化编辑</button>
+                    <button class="tab-btn" data-studio-tab="raw" data-i18n="studio.tabRaw">原始配置 (Raw)</button>
+                    <button class="tab-btn" data-studio-tab="diff" data-i18n="studio.tabDiff">修改对比 (Diff)</button>
+                  </div>
+                </div>
+
+                <div class="semantic-summary-bar" id="studioSemanticBar">
+                  <div class="summary-pill" id="pillListeners"><span>监听端口: —</span></div>
+                  <div class="summary-pill" id="pillEndpoints"><span>节点数: —</span></div>
+                  <div class="summary-pill" id="pillRules"><span>规则数: —</span></div>
+                  <div class="conflict-alert hidden" id="studioConflictAlert"><svg><use href="#i-alert"/></svg><span id="studioConflictText"></span></div>
+                </div>
+
+                <div class="studio-tab-content active" id="tabContentVisual">
+                  <div class="visual-editor-form">
+                    <div class="form-group">
+                      <label class="field"><span>混合/SOCKS 监听端口 (mixed-port / listen_port)</span><input type="number" id="visualPortInput" min="1" max="65535" placeholder="7890" /></label>
+                      <label class="field"><span>允许局域网连接 (allow-lan)</span><select id="visualAllowLanSelect"><option value="true">开启 (true)</option><option value="false">仅限本机 (false)</option></select></label>
+                      <label class="field"><span>运行模式 (mode)</span><select id="visualModeSelect"><option value="rule">规则分流 (rule)</option><option value="global">全局代理 (global)</option><option value="direct">全局直连 (direct)</option></select></label>
+                      <label class="field"><span>日志级别 (log-level)</span><select id="visualLogLevelSelect"><option value="info">Info</option><option value="warning">Warning</option><option value="error">Error</option><option value="debug">Debug</option><option value="silent">Silent</option></select></label>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="studio-tab-content" id="tabContentRaw">
+                  <textarea class="raw-code-editor" id="studioRawEditor" spellcheck="false" placeholder="# 配置文件内容"></textarea>
+                </div>
+
+                <div class="studio-tab-content" id="tabContentDiff">
+                  <div class="diff-viewer" id="studioDiffViewer"><p class="diff-empty-note">尚未做出修改</p></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="view" id="view-history">
+            <div class="section-toolbar">
+              <p class="section-lead" data-i18n="history.lead">历史网络诊断记录与修复履历</p>
+              <div class="toolbar-actions">
+                <button class="button ghost" id="openTimelineBtn" data-open-modal="timeline"><svg><use href="#i-history"/></svg><span data-i18n="history.timeline">审计时间线</span></button>
+                <button class="button ghost" id="refreshHistoryBtn"><svg><use href="#i-refresh"/></svg><span data-i18n="history.refresh">刷新历史记录</span></button>
+              </div>
+            </div>
+            <div class="data-table">
+              <div class="data-list data-header history-columns"><span>体检时间</span><span>总体状态</span><span>发现异常数</span><span>耗时</span><span>详情</span></div>
+              <div id="historyList"></div>
+            </div>
+          </section>
+
+          <section class="view" id="view-profiles">
+            <div class="section-toolbar">
+              <p class="section-lead" data-i18n="profiles.lead">保存并切换规则、引擎和防泄漏设置的完整快照。</p>
+              <button class="button primary" data-action="create-profile"><svg><use href="#i-plus"/></svg><span data-i18n="profiles.create">保存当前方案</span></button>
+            </div>
+            <div class="data-table">
+              <div class="data-list data-header profile-columns"><span data-i18n="table.profile">配置方案</span><span data-i18n="table.engine">引擎</span><span data-i18n="table.status">状态</span><span data-i18n="table.rules">规则</span><span></span></div>
+              <div id="profileList"><div class="loading-state"><span></span><span data-i18n="loading.profiles">正在加载配置方案…</span></div></div>
+            </div>
+          </section>
+
           <section class="view" id="view-proxies">
             <div class="section-toolbar">
               <p class="section-lead" data-i18n="proxies.lead">维护 SOCKS5 或直连端点；规则通过端点 ID 绑定。</p>
+              <button class="button ghost" id="openDiscoveryBtn" data-open-modal="discovery"><svg><use href="#i-search"/></svg><span data-i18n="proxies.discover">扫描端点</span></button>
+              <button class="button ghost" id="importProxiesBtn" data-i18n="proxies.import">导入端点</button>
               <button class="button primary" data-open-modal="proxy"><svg><use href="#i-plus"/></svg><span data-i18n="common.addProxy">添加代理</span></button>
+              <input type="file" id="importProxiesFile" accept="application/json,.json" hidden />
             </div>
             <div class="data-table">
               <div class="data-list data-header proxy-columns"><span data-i18n="table.proxy">代理</span><span data-i18n="table.type">类型</span><span data-i18n="table.endpoint">端点</span><span data-i18n="table.status">状态</span><span></span></div>
@@ -168,13 +334,13 @@
               <section class="settings-section">
                 <header class="section-header"><div><h2 data-i18n="settings.routingEngine">路由引擎</h2><p data-i18n="settings.routingEngineDescription">模式切换会重新加载当前规则</p></div></header>
                 <div class="settings-form-grid">
-                  <label class="field"><span data-i18n="settings.engineMode">引擎模式</span><select id="engineMode"><option value="win_divert">WinDivert (ProxiFyre)</option><option value="wfp" disabled>WFP（不可用）</option><option value="api_hook" disabled>API Hook（实验性）</option></select><small id="engineCapabilityHint" data-i18n="settings.dataPlane">仅显示核心当前可用的数据平面能力。</small></label>
+                  <label class="field"><span data-i18n="settings.engineMode">引擎模式</span><select id="engineMode"><option value="proxifyre">ProxiFyre</option><option value="wfp" disabled>WFP（不可用）</option><option value="api_hook" disabled>API Hook（实验性）</option></select><small id="engineCapabilityHint" data-i18n="settings.dataPlane">仅显示核心当前可用的数据平面能力。</small></label>
                   <label class="field"><span data-i18n="settings.logLevel">日志级别</span><select id="logLevel"><option value="error">Error</option><option value="warn">Warning</option><option value="info">Info</option><option value="debug">Debug</option></select></label>
                 </div>
               </section>
 
               <section class="settings-section">
-                <header class="section-header"><div><h2 data-i18n="settings.protection">防泄漏保护</h2><p data-i18n="settings.protectionDescription">仅对命中规则的可执行文件生效</p></div></header>
+                <header class="section-header"><div><h2 data-i18n="settings.protection">防泄漏保护</h2><p data-i18n="settings.protectionDescription">仅对匹配规则的可执行文件生效</p></div></header>
                 <label class="setting-row"><span><strong data-i18n="settings.leakMode">代理故障策略</strong><small data-i18n="settings.leakModeDescription">隐私优先会在代理不可达时阻断匹配应用</small></span><select id="leakProtectionMode"><option value="availability" data-i18n="settings.availabilityMode">可用性优先</option><option value="strict" data-i18n="settings.strictMode">隐私优先（严格阻断）</option></select></label>
                 <label class="setting-row"><span><strong data-i18n="settings.dns">强制 DNS 策略</strong><small data-i18n="settings.dnsDescription">阻止应用绕过代理直连 53 端口</small></span><span class="switch-control"><input type="checkbox" class="switch" id="dnsEnforced" /><span class="switch-track" aria-hidden="true"></span></span></label>
                 <label class="setting-row"><span><strong data-i18n="settings.ipv6">阻止 IPv6 直连</strong><small data-i18n="settings.ipv6Description">避免双栈应用从 IPv6 泄漏流量</small></span><span class="switch-control"><input type="checkbox" class="switch" id="ipv6Blocked" /><span class="switch-track" aria-hidden="true"></span></span></label>
@@ -187,18 +353,36 @@
                   <div><span data-i18n="settings.coreAddress">核心地址</span><code id="coreUrlValue">—</code></div>
                   <div><span data-i18n="settings.configVersion">配置版本</span><code id="configVersionValue">—</code></div>
                   <div><span data-i18n="settings.dataPlaneStatus">数据平面状态</span><code id="dataPlaneStatusValue">—</code></div>
+                  <div><span data-i18n="settings.compileDiagnostics">编译诊断</span><code id="compileDiagnosticsValue">—</code></div>
                   <div><span data-i18n="settings.authentication">认证方式</span><code>X-ProxyDuck-Token</code></div>
                 </div>
                 <div class="toolbar-actions settings-tools"><button class="button ghost" id="exportConfigBtn" data-i18n="settings.exportConfig">导出配置</button><button class="button ghost" id="importConfigBtn" data-i18n="settings.importConfig">导入配置</button><button class="button ghost" id="exportDiagnosticsBtn" data-i18n="settings.exportDiagnostics">导出诊断包</button><input type="file" id="importConfigFile" accept="application/json,.json" hidden /></div>
               </section>
 
+              <section class="settings-section">
+                <header class="section-header"><div><h2 data-i18n="autostart.title">开机自启</h2><p data-i18n="autostart.lead">在 Windows 系统开机登录时自动启动 ProxyDuck</p></div></header>
+                <label class="setting-row"><span><strong data-i18n="autostart.enabled">开机自动启动</strong><small id="autostartStatusHint" data-i18n="autostart.modeTaskScheduler">任务计划程序提权（推荐，免 UAC 弹窗）</small></span><span class="switch-control"><input type="checkbox" class="switch" id="autostartEnabled" /><span class="switch-track" aria-hidden="true"></span></span></label>
+                <label class="setting-row"><span><strong data-i18n="autostart.silent">开机静默常驻系统托盘（不弹出主窗口）</strong></span><span class="switch-control"><input type="checkbox" class="switch" id="autostartSilent" /><span class="switch-track" aria-hidden="true"></span></span></label>
+              </section>
+
+              <section class="settings-section">
+                <header class="section-header"><div><h2 data-i18n="updater.title">软件更新</h2><p data-i18n="updater.lead">检查 GitHub Releases 最新版本与更新说明</p></div></header>
+                <div class="info-list">
+                  <div><span data-i18n="updater.currentVersion">当前版本</span><code id="appVersionValue">v0.1.0</code></div>
+                </div>
+                <div class="toolbar-actions settings-tools">
+                  <button class="button ghost" id="checkForUpdatesBtn"><svg><use href="#i-refresh"/></svg><span data-i18n="updater.checkBtn">检查更新</span></button>
+                  <span id="updateCheckStatus" class="update-status-label"></span>
+                </div>
+              </section>
+
               <section class="settings-section diagnostics-section" id="settingsDiagnostics">
                 <header class="section-header">
-                  <div><h2 data-i18n="settings.diagnostics">诊断</h2><p data-i18n="settings.diagnosticsDescription">规则命中、代理使用量与核心日志</p></div>
+                  <div><h2 data-i18n="settings.diagnostics">诊断</h2><p data-i18n="settings.diagnosticsDescription">进程匹配、代理匹配量与核心日志</p></div>
                   <button class="button ghost" id="refreshLogsBtn"><svg><use href="#i-refresh"/></svg><span data-i18n="settings.refreshLogs">刷新日志</span></button>
                 </header>
                 <div class="diagnostic-grid">
-                  <div class="diagnostic-pane"><h3 data-i18n="settings.ruleRanking">规则命中排行</h3><div id="ruleStatsList" class="rank-list"><div class="loading-state"><span></span><span data-i18n="loading.statistics">正在加载统计…</span></div></div></div>
+                  <div class="diagnostic-pane"><h3 data-i18n="settings.ruleRanking">规则匹配排行</h3><div id="ruleStatsList" class="rank-list"><div class="loading-state"><span></span><span data-i18n="loading.statistics">正在加载统计…</span></div></div></div>
                   <div class="diagnostic-pane"><h3 data-i18n="settings.proxyUsage">代理使用量</h3><div id="proxyStatsList" class="rank-list"><div class="loading-state"><span></span><span data-i18n="loading.statistics">正在加载统计…</span></div></div></div>
                   <div class="diagnostic-pane log-pane"><h3 data-i18n="settings.liveLogs">实时日志</h3><div class="log-view" id="logList"><div class="loading-state"><span></span><span data-i18n="loading.logs">正在加载日志…</span></div></div></div>
                 </div>
@@ -222,7 +406,7 @@
 
     <dialog class="modal activity-modal" id="activityModal">
       <div class="modal-header"><div><span class="modal-kicker" data-i18n="modal.activityKicker">路由记录</span><h2 data-i18n="modal.allActivity">全部最近活动</h2></div><button type="button" class="modal-close" data-modal-close aria-label="关闭" data-i18n-aria-label="common.close">×</button></div>
-      <div class="activity-modal-toolbar"><p data-i18n="modal.activityDescription">查看本次核心运行期间记录的全部路由命中。</p><button class="button ghost small" id="refreshActivityBtn"><svg><use href="#i-refresh"/></svg><span data-i18n="common.refresh">刷新</span></button></div>
+      <div class="activity-modal-toolbar"><p data-i18n="modal.activityDescription">查看本次核心运行期间记录的全部进程匹配。</p><button class="button ghost small" id="refreshActivityBtn"><svg><use href="#i-refresh"/></svg><span data-i18n="common.refresh">刷新</span></button></div>
       <div class="data-table activity-modal-table">
         <div class="data-list data-header activity-columns"><span data-i18n="table.time">时间</span><span data-i18n="table.process">进程</span><span data-i18n="table.route">路由</span><span data-i18n="table.result">结果</span></div>
         <div class="activity-list" id="allActivity"></div>
@@ -233,10 +417,14 @@
       <form method="dialog" id="proxyForm">
         <div class="modal-header"><div><span class="modal-kicker" data-i18n="modal.proxyKicker">代理端点</span><h2 data-i18n="modal.addProxy">添加代理</h2></div><button type="button" class="modal-close" data-modal-close aria-label="关闭" data-i18n-aria-label="common.close">×</button></div>
         <div class="modal-body">
-          <label class="field"><span data-i18n="modal.name">名称</span><input id="proxyName" required maxlength="48" placeholder="例如 Clash Verge" data-i18n-placeholder="modal.proxyNamePlaceholder" /></label>
+          <label class="field"><span data-i18n="modal.name">名称</span><input id="proxyName" required maxlength="48" placeholder="例如 本地 SOCKS5" data-i18n-placeholder="modal.proxyNamePlaceholder" /></label>
           <div class="field-grid">
             <label class="field"><span data-i18n="modal.type">类型</span><select id="proxyKind"><option value="socks5">SOCKS5</option><option value="direct">DIRECT</option></select></label>
             <label class="field"><span data-i18n="modal.endpoint">端点</span><input id="proxyEndpoint" required placeholder="127.0.0.1:7897" /></label>
+          </div>
+          <div class="field-grid">
+            <label class="field"><span data-i18n="modal.username">用户名（可选）</span><input id="proxyUsername" autocomplete="username" /></label>
+            <label class="field"><span data-i18n="modal.password">密码（可选）</span><input id="proxyPassword" type="password" autocomplete="new-password" /></label>
           </div>
         </div>
         <div class="modal-actions"><button type="button" class="button ghost" data-modal-close data-i18n="common.cancel">取消</button><button class="button primary" value="default" data-i18n="modal.saveProxy">保存代理</button></div>
@@ -248,12 +436,17 @@
         <div class="modal-header"><div><span class="modal-kicker" data-i18n="modal.ruleKicker">应用规则</span><h2 id="ruleModalTitle" data-i18n="modal.createRule">新建路由规则</h2></div><button type="button" class="modal-close" data-modal-close aria-label="关闭" data-i18n-aria-label="common.close">×</button></div>
         <div class="modal-body">
           <label class="field"><span data-i18n="modal.ruleName">规则名称</span><input id="ruleName" required maxlength="64" placeholder="例如 Cursor 走开发代理" data-i18n-placeholder="modal.ruleNamePlaceholder" /></label>
+          <div class="field-grid"><label class="field"><span data-i18n="modal.ruleGroup">规则分组</span><input id="ruleGroup" maxlength="128" placeholder="例如 浏览器" data-i18n-placeholder="modal.ruleGroupPlaceholder" /></label><label class="field"><span data-i18n="modal.ruleTags">标签</span><input id="ruleTags" maxlength="256" placeholder="浏览器, 工作" data-i18n-placeholder="modal.ruleTagsPlaceholder" /></label></div>
           <div class="field-grid">
             <label class="field"><span data-i18n="modal.matchType">匹配方式</span><select id="ruleMatchType"><option value="appNames" data-i18n="modal.processName">进程名</option><option value="exePaths" data-i18n="modal.executablePath">可执行文件路径</option><option value="pids">PID</option><option value="wildcard" data-i18n="modal.keyword">关键字</option></select></label>
             <label class="field"><span data-i18n="modal.matchValue">匹配值</span><input id="ruleMatchValue" required placeholder="cursor.exe" /></label>
           </div>
-          <label class="field"><span data-i18n="modal.proxyEndpoint">代理端点</span><select id="ruleProxy" required></select></label>
-          <div class="option-grid"><label><input type="checkbox" id="ruleTcp" checked />TCP</label><label><input type="checkbox" id="ruleUdp" checked />UDP</label><label><input type="checkbox" id="ruleDns" checked />DNS</label><label><input type="checkbox" id="ruleChildren" checked /><span data-i18n="modal.childInheritance">子进程继承</span></label></div>
+          <div class="field-grid">
+            <label class="field"><span data-i18n="modal.routeAction">路由动作</span><select id="ruleAction"><option value="proxy" data-i18n="modal.actionProxy">通过代理</option><option value="direct" data-i18n="modal.actionDirect">直连</option><option value="block" data-i18n="modal.actionBlock">阻断</option><option value="reject" data-i18n="modal.actionReject">拒绝连接</option></select></label>
+            <label class="field"><span data-i18n="modal.proxyEndpoint">代理端点</span><select id="ruleProxy"></select></label>
+          </div>
+          <div class="field-grid"><label class="field"><span data-i18n="modal.destinationDomains">目标域名 / CIDR</span><input id="ruleDestination" placeholder="example.com, 1.1.1.0/24" data-i18n-placeholder="modal.destinationPlaceholder" /></label><label class="field"><span data-i18n="modal.destinationPorts">目标端口</span><input id="ruleDestinationPorts" inputmode="numeric" placeholder="443, 8443" /></label></div>
+          <div class="option-grid"><label><input type="checkbox" id="ruleTcp" checked />TCP</label><label><input type="checkbox" id="ruleUdp" checked />UDP</label><label title="旧配置兼容标记"><input type="checkbox" id="ruleDns" checked /><span data-i18n="modal.dnsGuard">DNS 防护标记（旧兼容）</span></label><label><input type="checkbox" id="ruleChildren" checked /><span data-i18n="modal.childInheritance">子进程继承</span></label></div>
         </div>
         <div class="modal-actions"><button type="button" class="button ghost" data-modal-close data-i18n="common.cancel">取消</button><button class="button primary" value="default" id="ruleSubmitLabel" data-i18n="modal.createRule">创建规则</button></div>
       </form>
@@ -276,6 +469,102 @@
     </dialog>
 
     <dialog class="confirm-modal" id="confirmModal"><form method="dialog"><div class="confirm-icon"><svg><use href="#i-alert"/></svg></div><h2 id="confirmTitle" data-i18n="modal.confirmTitle">确认操作</h2><p id="confirmMessage"></p><div class="modal-actions"><button class="button ghost" value="cancel" data-i18n="common.cancel">取消</button><button class="button danger" value="confirm" data-i18n="modal.confirmDelete">确认删除</button></div></form></dialog>
+
+    <dialog class="modal" id="explainModal">
+      <div class="modal-header">
+        <div><span class="modal-kicker" data-i18n="explain.title">路由决策追溯 (Explain Route)</span><h2 id="explainModalTarget">—</h2></div>
+        <button type="button" class="modal-close" data-modal-close aria-label="关闭" data-i18n-aria-label="common.close">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="explain-summary-card" id="explainSummary"></div>
+        <h3 data-i18n="explain.chain">规则链匹配流水线</h3>
+        <div class="explain-chain-list" id="explainChainList"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="button ghost" data-modal-close data-i18n="common.close">关闭</button>
+      </div>
+    </dialog>
+
+    <dialog class="modal" id="simulatorModal">
+      <div class="modal-header">
+        <div><span class="modal-kicker" data-i18n="rules.simulator">策略仿真</span><h2 data-i18n="simulator.title">策略仿真器 (Policy Simulator)</h2></div>
+        <button type="button" class="modal-close" data-modal-close aria-label="关闭" data-i18n-aria-label="common.close">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="field-grid">
+          <label class="field"><span data-i18n="simulator.processInput">进程名称 / 路径</span><input id="simProcess" placeholder="chrome.exe / C:\...\app.exe" /></label>
+          <label class="field"><span data-i18n="simulator.destinationInput">目标域名 / IP</span><input id="simDestination" placeholder="api.openai.com / 1.1.1.1" /></label>
+        </div>
+        <div class="field-grid">
+          <label class="field"><span data-i18n="simulator.portInput">目标端口</span><input id="simPort" type="number" placeholder="443" /></label>
+          <label class="field"><span data-i18n="simulator.protocolInput">协议</span><select id="simProtocol"><option value="tcp">TCP</option><option value="udp">UDP</option></select></label>
+        </div>
+        <div class="toolbar-actions" style="margin-top: 8px;">
+          <button type="button" class="button primary" id="runSimulationBtn" data-i18n="simulator.simulateBtn">执行仿真</button>
+        </div>
+        <div class="simulator-result-box hidden" id="simResultBox">
+          <h3 data-i18n="simulator.simulationResult">仿真结果</h3>
+          <div id="simResultContent"></div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="button ghost" data-modal-close data-i18n="common.close">关闭</button>
+      </div>
+    </dialog>
+
+    <dialog class="modal" id="discoveryModal">
+      <div class="modal-header">
+        <div><span class="modal-kicker" data-i18n="proxies.discover">扫描端点</span><h2 data-i18n="discovery.title">本地端点自动发现</h2></div>
+        <button type="button" class="modal-close" data-modal-close aria-label="关闭" data-i18n-aria-label="common.close">×</button>
+      </div>
+      <div class="modal-body">
+        <p data-i18n="discovery.subtitle">扫描本地正在运行的 Clash / v2rayN / Sing-Box / Shadowsocks 端口</p>
+        <div class="toolbar-actions" style="margin-bottom: 12px;">
+          <button type="button" class="button primary" id="startDiscoveryBtn" data-i18n="discovery.scanBtn">开始扫描</button>
+        </div>
+        <div class="data-table">
+          <div class="data-list data-header discovery-columns"><span data-i18n="discovery.clientName">客户端</span><span data-i18n="discovery.port">端口</span><span data-i18n="discovery.protocol">协议</span><span>操作</span></div>
+          <div id="discoveredEndpointsList"></div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="button ghost" data-modal-close data-i18n="common.close">关闭</button>
+      </div>
+    </dialog>
+
+    <dialog class="modal timeline-modal" id="timelineModal">
+      <div class="modal-header">
+        <div><span class="modal-kicker" data-i18n="history.timeline">审计时间线</span><h2 data-i18n="timeline.title">审计与事件时间线</h2></div>
+        <button type="button" class="modal-close" data-modal-close aria-label="关闭" data-i18n-aria-label="common.close">×</button>
+      </div>
+      <div class="activity-modal-toolbar">
+        <p data-i18n="timeline.subtitle">记录核心规则切换、配置修改、网络急救及安全事件</p>
+        <div class="toolbar-actions">
+          <button class="button ghost small" id="clearTimelineBtn" data-i18n="timeline.clear">清空时间线</button>
+          <button class="button ghost small" id="refreshTimelineBtn"><svg><use href="#i-refresh"/></svg><span data-i18n="timeline.refresh">刷新时间线</span></button>
+        </div>
+      </div>
+      <div class="data-table">
+        <div class="data-list data-header timeline-columns"><span data-i18n="timeline.eventTime">发生时间</span><span data-i18n="timeline.category">分类</span><span data-i18n="timeline.detail">详细内容</span></div>
+        <div id="timelineEventsList" class="activity-list"></div>
+      </div>
+    </dialog>
+
+    <dialog class="modal" id="updateModal">
+      <div class="modal-header">
+        <div><span class="modal-kicker" data-i18n="updater.title">软件更新</span><h2 id="updateModalVersion">—</h2></div>
+        <button type="button" class="modal-close" data-modal-close aria-label="关闭" data-i18n-aria-label="common.close">×</button>
+      </div>
+      <div class="modal-body">
+        <h3 data-i18n="updater.releaseNotes">更新日志</h3>
+        <pre class="update-notes-box" id="updateReleaseNotes"></pre>
+        <div id="updateDownloadProgress" class="update-progress-bar hidden"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="button ghost" data-modal-close data-i18n="common.cancel">取消</button>
+        <button type="button" class="button primary" id="confirmInstallUpdateBtn" data-i18n="updater.downloadInstall">立即下载并静默升级</button>
+      </div>
+    </dialog>
 
     <script type="module" src="./app.js"></script>
   </body>

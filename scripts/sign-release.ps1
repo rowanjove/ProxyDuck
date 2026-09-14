@@ -1,6 +1,11 @@
 param(
   [Parameter(Mandatory = $true)]
-  [string]$Directory
+  [string]$Directory,
+
+  # Local/PR builds may intentionally remain unsigned. Release jobs should
+  # pass this switch so missing credentials can never silently produce an
+  # artifact that looks publishable.
+  [switch]$RequireSignature
 )
 
 $ErrorActionPreference = "Stop"
@@ -9,6 +14,9 @@ $certificateBase64 = if ($env:PROXYDUCK_SIGNING_PFX_BASE64) { $env:PROXYDUCK_SIG
 $certificatePassword = if ($env:PROXYDUCK_SIGNING_PFX_PASSWORD) { $env:PROXYDUCK_SIGNING_PFX_PASSWORD } else { $env:PROXYDOCK_SIGNING_PFX_PASSWORD }
 
 if ([string]::IsNullOrWhiteSpace($certificateBase64)) {
+  if ($RequireSignature) {
+    throw "A signing certificate is required, but PROXYDUCK_SIGNING_PFX_BASE64 is not configured"
+  }
   Write-Host "[ProxyDuck] Signing certificate is not configured; binaries remain unsigned."
   exit 0
 }
@@ -32,6 +40,10 @@ try {
   foreach ($binary in $binaries) {
     & $signtool.FullName sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $certificatePath /p $certificatePassword $binary.FullName
     if ($LASTEXITCODE -ne 0) { throw "failed to sign $($binary.FullName)" }
+    $signature = Get-AuthenticodeSignature -LiteralPath $binary.FullName
+    if ($signature.Status -ne "Valid") {
+      throw "signature verification failed for $($binary.FullName): $($signature.Status)"
+    }
   }
 } finally {
   Remove-Item -LiteralPath $temporaryDirectory -Recurse -Force -ErrorAction SilentlyContinue

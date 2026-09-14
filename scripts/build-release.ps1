@@ -24,12 +24,19 @@ if ($BundleProxifyre) {
 & (Join-Path $PSScriptRoot "fetch-default-runtimes.ps1")
 
 Write-Host "[ProxyDuck] Building release binaries..."
-cargo build --release -p proxyduck-core -p proxyduck-cli -p proxyduck-ui
+cargo build --release -p proxyduck-core -p proxyduck-service -p proxyduck-cli -p proxyduck-ui
 if ($LASTEXITCODE -ne 0) {
   throw "cargo build failed"
 }
 
 $releaseDir = Join-Path $root "release\ProxyDuck"
+$staleInstaller = Join-Path $root ("release\installer\ProxyDuck-" + (Get-Content (Join-Path $root "package.json") -Raw | ConvertFrom-Json).version + "-setup.exe")
+if (Test-Path -LiteralPath $staleInstaller -PathType Leaf) {
+  # Never let a portable rebuild silently package an installer produced from
+  # an older source tree.  CI may recreate this file with ISCC afterwards.
+  Remove-Item -LiteralPath $staleInstaller -Force
+  Write-Host "[ProxyDuck] Removed stale installer before rebuilding portable artifacts."
+}
 $releaseDirFull = [System.IO.Path]::GetFullPath($releaseDir)
 $expectedReleaseRoot = [System.IO.Path]::GetFullPath((Join-Path $root "release")) + [System.IO.Path]::DirectorySeparatorChar
 if (-not $releaseDirFull.StartsWith($expectedReleaseRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -42,6 +49,7 @@ if (Test-Path $releaseDir) {
 }
 
 Copy-Item (Join-Path $root "target\release\proxyduck-core.exe") (Join-Path $releaseDir "proxyduck-core.exe") -Force
+Copy-Item (Join-Path $root "target\release\proxyduck-service.exe") (Join-Path $releaseDir "proxyduck-service.exe") -Force
 Copy-Item (Join-Path $root "target\release\proxyduck-cli.exe") (Join-Path $releaseDir "proxyduck-cli.exe") -Force
 Copy-Item (Join-Path $root "target\release\proxyduck-ui.exe") (Join-Path $releaseDir "ProxyDuck.exe") -Force
 Copy-Item (Join-Path $root "smartflow-core\config.example.json5") (Join-Path $releaseDir "config.example.json5") -Force
@@ -151,8 +159,16 @@ $runtimeLock = [ordered]@{
   files = @($lockedRuntimeFiles)
 }
 $runtimeLock | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $releaseDir "RUNTIME-LOCK.json") -Encoding UTF8
+$buildManifest = [ordered]@{
+  schemaVersion = 1
+  version = (Get-Content (Join-Path $root "package.json") -Raw | ConvertFrom-Json).version
+  buildId = [Guid]::NewGuid().ToString("N")
+  generatedAt = [DateTime]::UtcNow.ToString("o")
+}
+$buildManifest | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath (Join-Path $releaseDir ".release-build.json") -Encoding UTF8
 
 Write-Host "[ProxyDuck] Build output: $releaseDir"
 Write-Host "[ProxyDuck] Run app:  .\ProxyDuck.exe"
 Write-Host "[ProxyDuck] Run core: .\proxyduck-core.exe --bind $Bind"
+Write-Host "[ProxyDuck] Service: .\proxyduck-service.exe --install"
 Write-Host "[ProxyDuck] Run cli:  .\proxyduck-cli.exe status"

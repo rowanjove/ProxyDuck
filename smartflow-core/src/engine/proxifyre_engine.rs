@@ -1,25 +1,26 @@
-﻿use anyhow::Result;
+use anyhow::Result;
 
 use crate::{
     engine::{proxifyre::ProxifyreBackend, DataPlaneBackend, ProxyEngine},
-    model::{AppConfig, DataPlaneStatus, EngineMode},
+    model::{AppConfig, DataPlaneStatus, EngineMode, ProcessInfo},
 };
 
-pub struct WinDivertEngine {
+/// ProxyDuck's default application-routing engine backed by ProxiFyre/WinpkFilter.
+pub struct ProxiFyreEngine {
     backend: Box<dyn DataPlaneBackend>,
 }
 
-impl Default for WinDivertEngine {
+impl Default for ProxiFyreEngine {
     fn default() -> Self {
         Self {
-            backend: Box::new(ProxifyreBackend::new("windivert")),
+            backend: Box::new(ProxifyreBackend::new("proxifyre")),
         }
     }
 }
 
-impl ProxyEngine for WinDivertEngine {
+impl ProxyEngine for ProxiFyreEngine {
     fn mode(&self) -> EngineMode {
-        EngineMode::WinDivert
+        EngineMode::ProxiFyre
     }
 
     fn start(&self, config: &AppConfig) -> Result<()> {
@@ -40,5 +41,9 @@ impl ProxyEngine for WinDivertEngine {
 
     fn maintain(&self, config: &AppConfig) -> Result<bool> {
         self.backend.maintain(config)
+    }
+
+    fn reconcile_processes(&self, config: &AppConfig, processes: &[ProcessInfo]) -> Result<bool> {
+        self.backend.reconcile_processes(config, processes)
     }
 }

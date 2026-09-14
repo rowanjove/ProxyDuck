@@ -9,7 +9,9 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $releaseDirectory = (Resolve-Path $Directory).Path
 
-if (-not $releaseDirectory.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) {
+$rootPrefix = $root.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+if (-not ($releaseDirectory.Equals($root, [StringComparison]::OrdinalIgnoreCase) -or
+    $releaseDirectory.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase))) {
   throw "Release directory must be inside the workspace: $releaseDirectory"
 }
 
@@ -20,6 +22,7 @@ if ($RequireSingBox -and -not (Test-Path -LiteralPath (Join-Path $releaseDirecto
 $requiredFiles = @(
   "ProxyDuck.exe",
   "proxyduck-core.exe",
+  "proxyduck-service.exe",
   "proxyduck-cli.exe",
   "config.example.json5",
   "README.md",
@@ -123,8 +126,14 @@ if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($cliVersion)) {
   throw "proxyduck-cli.exe --version failed"
 }
 
+$serviceVersion = & (Join-Path $releaseDirectory "proxyduck-service.exe") --help
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($serviceVersion)) {
+  throw "proxyduck-service.exe --help failed"
+}
+
 Write-Host "[ProxyDuck] Release smoke test passed"
 Write-Host "  $coreVersion"
-Write-Host "  $cliVersion"
+  Write-Host "  $cliVersion"
+  Write-Host "  Service host: available"
 Write-Host "  Default runtimes: ProxiFyre $($defaultManifest.proxifyre.version), WinpkFilter $($defaultManifest.winpkfilter.version)"
 Write-Host "  Base files: $($requiredFiles.Count)"

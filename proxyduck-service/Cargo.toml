@@ -1,0 +1,21 @@
+[package]
+name = "proxyduck-service"
+version = "1.1.0"
+edition = "2021"
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow = "1.0"
+proxyduck-common = { path = "../proxyduck-common" }
+proxyduck-core = { path = "../smartflow-core" }
+tokio = { version = "1.42", features = ["rt-multi-thread", "sync", "time"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.8.1"
+windows = { version = "0.59", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_System_Threading"
+] }

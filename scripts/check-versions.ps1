@@ -5,6 +5,7 @@ $tauriVersion = (Get-Content -LiteralPath (Join-Path $root "smartflow-ui\src-tau
 $manifests = @(
   "proxyduck-common\Cargo.toml",
   "smartflow-core\Cargo.toml",
+  "proxyduck-service\Cargo.toml",
   "smartflow-cli\Cargo.toml",
   "smartflow-ui\src-tauri\Cargo.toml"
 )

@@ -5,6 +5,7 @@ import {
   engineLabel,
   escapeHtml,
   matcherSummary,
+  normalizeError,
   protectionSummary,
   totalHits,
   validateEndpoint
@@ -29,5 +30,21 @@ test("endpoint validation rejects missing or invalid ports", () => {
 test("dashboard summaries are stable", () => {
   assert.equal(totalHits({ processHits: { node: 2, cursor: 3 } }), 5);
   assert.equal(protectionSummary({ dnsEnforced: true, ipv6Blocked: true, dohBlocked: false }), "2/3 已启用");
-  assert.equal(engineLabel("win_divert"), "WinDivert");
+  assert.equal(engineLabel("win_divert"), "ProxiFyre");
+});
+
+test("normalizeError preserves structured routing diagnostics", () => {
+  const error = new Error("配置应用失败");
+  error.diagnostics = [
+    { code: "PD-RULE-DESTINATION-UNSUPPORTED", remediation: "切换到 sing-box" },
+    { code: "PD-RULE-NETWORK-UNSUPPORTED", message: "规则已降级" },
+    { code: "PD-THIRD", effective: "仅匹配进程" },
+    { code: "PD-FOURTH", message: "不应展开" }
+  ];
+  const message = normalizeError(error);
+  assert.match(message, /PD-RULE-DESTINATION-UNSUPPORTED/);
+  assert.match(message, /切换到 sing-box/);
+  assert.match(message, /PD-RULE-NETWORK-UNSUPPORTED/);
+  assert.match(message, /\+1/);
+  assert.doesNotMatch(message, /PD-FOURTH/);
 });

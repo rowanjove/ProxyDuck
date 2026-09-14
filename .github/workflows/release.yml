@@ -37,12 +37,12 @@ jobs:
       - name: Smoke-test portable release
         shell: pwsh
         run: .\scripts\smoke-release.ps1
-      - name: Sign binaries when credentials are configured
+      - name: Sign release binaries (required)
         shell: pwsh
         env:
           PROXYDUCK_SIGNING_PFX_BASE64: ${{ secrets.PROXYDUCK_SIGNING_PFX_BASE64 || secrets.PROXYDOCK_SIGNING_PFX_BASE64 }}
           PROXYDUCK_SIGNING_PFX_PASSWORD: ${{ secrets.PROXYDUCK_SIGNING_PFX_PASSWORD || secrets.PROXYDOCK_SIGNING_PFX_PASSWORD }}
-        run: .\scripts\sign-release.ps1 -Directory .\release\ProxyDuck
+        run: .\scripts\sign-release.ps1 -Directory .\release\ProxyDuck -RequireSignature
       - name: Resolve version
         id: version
         shell: pwsh
@@ -54,25 +54,32 @@ jobs:
       - name: Build installer
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           choco install innosetup --no-progress -y
-          iscc "/DAppVersion=${{ steps.version.outputs.value }}" .\installer\ProxyDuck.iss
-      - name: Sign installer when credentials are configured
+          $iscc = Get-Command iscc -ErrorAction Stop
+          & $iscc.Source "/DAppVersion=${{ steps.version.outputs.value }}" .\installer\ProxyDuck.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compiler failed with exit code $LASTEXITCODE" }
+          $installer = ".\release\installer\ProxyDuck-${{ steps.version.outputs.value }}-setup.exe"
+          if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw "Inno Setup did not produce $installer" }
+          $build = Get-Content .\release\ProxyDuck\.release-build.json -Raw | ConvertFrom-Json
+          [ordered]@{ schemaVersion = 1; version = '${{ steps.version.outputs.value }}'; buildId = $build.buildId; installer = [IO.Path]::GetFileName($installer); generatedAt = [DateTime]::UtcNow.ToString('o') } |
+            ConvertTo-Json | Set-Content .\release\installer\ProxyDuck-${{ steps.version.outputs.value }}-setup.exe.build.json -Encoding UTF8
+      - name: Sign installer (required)
         shell: pwsh
         env:
           PROXYDUCK_SIGNING_PFX_BASE64: ${{ secrets.PROXYDUCK_SIGNING_PFX_BASE64 || secrets.PROXYDOCK_SIGNING_PFX_BASE64 }}
           PROXYDUCK_SIGNING_PFX_PASSWORD: ${{ secrets.PROXYDUCK_SIGNING_PFX_PASSWORD || secrets.PROXYDOCK_SIGNING_PFX_PASSWORD }}
-        run: .\scripts\sign-release.ps1 -Directory .\release\installer
+        run: .\scripts\sign-release.ps1 -Directory .\release\installer -RequireSignature
       - name: Package and hash artifacts
         shell: pwsh
-        run: |
-          Compress-Archive -Path .\release\ProxyDuck -DestinationPath ".\release\ProxyDuck-${{ steps.version.outputs.value }}-portable.zip" -Force
-          Get-ChildItem .\release\*.zip, .\release\installer\*.exe | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $([IO.Path]::GetFileName($_.Path))" } | Set-Content .\release\SHA256SUMS.txt
+        run: .\scripts\package-release.ps1 -RequireInstaller -RequireSignature -RequireCleanSource
       - uses: actions/upload-artifact@v7
         with:
           name: ProxyDuck-${{ steps.version.outputs.value }}
           path: |
             release/*-portable.zip
             release/installer/*.exe
+            release/release-manifest.json
             release/SHA256SUMS.txt
       - uses: softprops/action-gh-release@v3
         if: startsWith(github.ref, 'refs/tags/')
@@ -80,5 +87,6 @@ jobs:
           files: |
             release/*-portable.zip
             release/installer/*.exe
+            release/release-manifest.json
             release/SHA256SUMS.txt
           generate_release_notes: true

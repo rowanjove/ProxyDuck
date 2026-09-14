@@ -10,7 +10,7 @@ const frontend = `${api}\n${app}`;
 
 test("desktop shell keeps the requested navigation hierarchy", () => {
   const views = [...html.matchAll(/data-view="([^"]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(views, ["overview", "rules", "proxies", "processes", "launch", "settings"]);
+  assert.deepEqual(views, ["overview", "rules", "doctor", "studio", "history", "profiles", "proxies", "processes", "launch", "settings"]);
   assert.doesNotMatch(html, /data-view="diagnostics"/);
   assert.match(css, /grid-template-columns:\s*168px minmax\(0, 1fr\)/);
 });
@@ -63,7 +63,7 @@ test("proxy modal restores endpoint input state and overview reports truthful ro
 
 test("existing API and IPC boundaries remain wired", () => {
   for (const contract of [
-    'invokeTauri("get_core_session")',
+    'invokeTauri("refresh_core_session")',
     'invokeTauri("get_system_preflight")',
     'invokeTauri("sync_runtime_enabled"',
     'invokeTauri("choose_executable")',
@@ -78,10 +78,16 @@ test("existing API and IPC boundaries remain wired", () => {
     'api.post(`/rules/${id}/duplicate`',
     'api.post("/rules/reorder"',
     'api.put("/config"',
-    'api.post("/templates/ai-dev"'
+    'api.post(templateId === "ai-dev"'
   ]) {
     assert.ok(frontend.includes(contract), `missing contract: ${contract}`);
   }
+  assert.match(app, /function scheduleReconnect\(\)/);
+  assert.match(app, /state\.reconnectInFlight/);
+  assert.match(api, /class CoreApiError extends Error/);
+  assert.match(api, /details\?\.diagnostics/);
+  assert.match(api, /payload\?\.diagnostics/);
+  assert.match(api, /requestNamedPipe\(method, path, body, timeout\)/);
 });
 
 test("rule workbench supports editing duplication ordering and dry runs", () => {
@@ -93,12 +99,55 @@ test("rule workbench supports editing duplication ordering and dry runs", () => 
   assert.match(html, /id="ruleModalTitle"/);
 });
 
+test("rule workbench exposes grouping, tags, and batch state controls", () => {
+  assert.match(html, /id="ruleGroup"/);
+  assert.match(html, /id="ruleTags"/);
+  assert.match(html, /id="ruleBatchEnableBtn"/);
+  assert.match(html, /id="ruleBatchDisableBtn"/);
+  assert.match(app, /api\.post\("\/rules\/batch-enabled"/);
+  assert.match(app, /data-rule-select/);
+  assert.match(app, /templateSelect/);
+  assert.match(html, /value="browser"/);
+});
+
+test("profile workbench exposes snapshot lifecycle actions", () => {
+  assert.match(html, /id="view-profiles"/);
+  assert.match(html, /data-action="create-profile"/);
+  for (const action of ["diff-profile", "clone-profile", "activate-profile", "delete-profile"]) {
+    assert.match(app, new RegExp(`data-action=\\"${action}\\"`));
+  }
+  for (const contract of [
+    'api.post("/profiles"',
+    'api.post(`/profiles/${id}/activate`',
+    'api.post(`/profiles/${id}/clone`',
+    'api.get(`/profiles/${id}/diff`'
+  ]) {
+    assert.ok(frontend.includes(contract), `missing profile contract: ${contract}`);
+  }
+});
+
 test("settings provide redacted config and diagnostics portability", () => {
   assert.match(app, /function sanitizedConfig\(\)/);
   assert.match(app, /proxy\.password = null/);
   assert.match(app, /function exportDiagnostics\(\)/);
   assert.match(app, /async function importConfigFile\(file\)/);
   assert.match(html, /id="importConfigFile"/);
+});
+
+test("configuration import previews replacement scope before applying", () => {
+  assert.match(app, /api\.post\("\/config\/import\/preview"/);
+  assert.match(app, /preview\.changedSections/);
+  assert.match(app, /preview\.validationError/);
+  assert.match(app, /operation: t\(`confirm\.importOperation/);
+});
+
+test("proxy endpoint import previews and applies common client files", () => {
+  assert.match(html, /id="importProxiesBtn"/);
+  assert.match(html, /id="importProxiesFile"/);
+  assert.match(app, /api\.post\("\/proxies\/import\/preview"/);
+  assert.match(app, /api\.post\("\/proxies\/import"/);
+  assert.match(app, /preview\.items \|\| \[\]/);
+  assert.match(app, /confirm\.importProxiesPreviewDescription/);
 });
 
 test("first-run setup verifies desktop prerequisites and an actively tested proxy", () => {
@@ -143,4 +192,11 @@ test("overview routing badges use actual data-plane state", () => {
   assert.match(html, /id="dataPlaneStatusValue"/);
   assert.match(html, /id="leakProtectionMode"/);
   assert.match(app, /failClosedActive/);
+});
+
+test("runtime diagnostics expose strict blockers and compatibility warnings", () => {
+  assert.match(html, /id="compileDiagnosticsValue"/);
+  assert.match(app, /runtimeStatus\?\.compileDiagnostics/);
+  assert.match(app, /diagnostic-error/);
+  assert.match(app, /diagnostic-warning/);
 });
