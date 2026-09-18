@@ -96,4 +96,4 @@ npx playwright install chromium
 
 ## History, Contributions, and Licensing
 
-ProxyDuck was formerly **SmartFlow**; versioning restarts at 1.0.0. Source code is licensed under the [MIT License](LICENSE). Third-party runtimes retain their respective upstream licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [THIRD_PARTY_SOURCES.md](THIRD_PARTY_SOURCES.md).
+ProxyDuck was formerly **SmartFlow**; versioning restarts at 1.0.0. Source code is licensed under the [Apache-2.0 License](LICENSE). Third-party runtimes retain their respective upstream licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [THIRD_PARTY_SOURCES.md](THIRD_PARTY_SOURCES.md).
