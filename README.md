@@ -10,7 +10,7 @@
 
   [![Version](https://img.shields.io/badge/version-1.1.0-23b7a8?style=flat-square)](https://github.com/rowanjove/ProxyDuck/releases)
   [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-1674b1?style=flat-square&logo=windows)](#系统要求)
-  [![License](https://img.shields.io/badge/license-MIT-f1c40f?style=flat-square)](LICENSE)
+  [![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](LICENSE)
   [![CI](https://img.shields.io/github/actions/workflow/status/rowanjove/ProxyDuck/ci.yml?branch=main&style=flat-square&label=checks)](https://github.com/rowanjove/ProxyDuck/actions)
 </div>
 
@@ -188,4 +188,4 @@ ProxyDuck 的前身是 **SmartFlow**。随着项目从简单的规则原型成�
 
 ## 开源许可
 
-ProxyDuck 自有源码采用 [MIT License](LICENSE)。第三方运行时保留各自许可证，MIT 许可不覆盖 ProxiFyre、WinpkFilter 或用户自行安装的代理内核。
+ProxyDuck 自有源码采用 [Apache-2.0 License](LICENSE)。第三方运行时保留各自许可证，MIT 许可不覆盖 ProxiFyre、WinpkFilter 或用户自行安装的代理内核。
